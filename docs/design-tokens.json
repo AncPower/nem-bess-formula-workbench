@@ -1,0 +1,50 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "color": {
+    "$type": "color",
+    "text": {
+      "primary": { "$value": { "colorSpace": "srgb", "components": [0.122, 0.161, 0.2], "hex": "#1f2933" } },
+      "muted": { "$value": { "colorSpace": "srgb", "components": [0.322, 0.376, 0.427], "hex": "#52606d" } }
+    },
+    "surface": {
+      "page": { "$value": { "colorSpace": "srgb", "components": [0.953, 0.961, 0.969], "hex": "#f3f5f7" } },
+      "panel": { "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff" } },
+      "line": { "$value": { "colorSpace": "srgb", "components": [0.851, 0.871, 0.89], "hex": "#d9dee3" } }
+    },
+    "market": {
+      "charge": { "$value": { "colorSpace": "srgb", "components": [0.043, 0.431, 0.31], "hex": "#0b6e4f" }, "$description": "充電、執行、主要按鈕" },
+      "charge-band": { "$value": { "colorSpace": "srgb", "components": [0.89, 0.937, 0.914], "hex": "#e3efe9" } },
+      "discharge": { "$value": { "colorSpace": "srgb", "components": [0.604, 0.275, 0], "hex": "#9a4600" } },
+      "discharge-band": { "$value": { "colorSpace": "srgb", "components": [0.984, 0.933, 0.867], "hex": "#fbeedd" } },
+      "forecast": { "$value": { "colorSpace": "srgb", "components": [0.231, 0.357, 0.647], "hex": "#3b5ba5" } }
+    },
+    "status": {
+      "error": { "$value": { "colorSpace": "srgb", "components": [0.706, 0.137, 0.094], "hex": "#b42318" } }
+    }
+  },
+  "font": {
+    "body": { "$type": "fontFamily", "$value": ["PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "system-ui", "sans-serif"] },
+    "mono": { "$type": "fontFamily", "$value": ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"] }
+  },
+  "font-size": {
+    "$type": "dimension",
+    "tick": { "$value": { "value": 12, "unit": "px" } },
+    "ui": { "$value": { "value": 14, "unit": "px" } },
+    "body": { "$value": { "value": 16, "unit": "px" } },
+    "result": { "$value": { "value": 24, "unit": "px" } }
+  },
+  "font-weight": {
+    "$type": "fontWeight",
+    "regular": { "$value": 400 },
+    "strong": { "$value": 600 }
+  },
+  "space": {
+    "$type": "dimension",
+    "1": { "$value": { "value": 4, "unit": "px" } },
+    "2": { "$value": { "value": 8, "unit": "px" } },
+    "3": { "$value": { "value": 12, "unit": "px" } },
+    "4": { "$value": { "value": 16, "unit": "px" } }
+  },
+  "radius": { "$type": "dimension", "panel": { "$value": { "value": 6, "unit": "px" } } },
+  "motion": { "spinner": { "$type": "duration", "$value": { "value": 800, "unit": "ms" } } }
+}
