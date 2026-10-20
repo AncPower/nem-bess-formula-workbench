@@ -1,0 +1,11 @@
+import { readFile } from "node:fs/promises";
+import assert from "node:assert/strict";
+import { fingerprint } from "./build.mjs";
+import { review_history } from "../src/history_review.js";
+const read = async (path) => JSON.parse(await readFile(path, "utf8"));
+const summary = await read("data/daily_summary.json");
+assert.deepEqual(summary.input_fingerprint, await fingerprint(), "Historical snapshot is stale");
+assert.ok(summary.sources.every((source) => source.url.startsWith("https://nemweb.com.au/") && /^[a-f0-9]{64}$/.test(source.sha256)));
+const result = review_history({ summary, registry: await read("formulas/registry.json"), catalog: await read("formulas/variables.json"), battery: await read("config/battery.json"), standard: 0 });
+assert.ok(result.valid_days > 0);
+console.log(JSON.stringify({ valid_days: result.valid_days, excluded_days: result.excluded.length, baseline_aud: result.selected.revenue }));
