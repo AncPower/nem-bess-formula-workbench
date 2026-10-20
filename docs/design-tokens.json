@@ -18,12 +18,12 @@
       "low": { "$value": { "colorSpace": "srgb", "components": [0.863, 0.91, 0.933], "hex": "#DCE8EE" } },
       "high": { "$value": { "colorSpace": "srgb", "components": [0.953, 0.882, 0.91], "hex": "#F3E1E8" } }
     },
-    "rule": { "$value": { "colorSpace": "srgb", "components": [0.788, 0.827, 0.859], "hex": "#C9D3DB" }, "$description": "僅裝飾分隔線，不可當輸入框邊框" }
+    "rule": { "$value": { "colorSpace": "srgb", "components": [0.788, 0.827, 0.859], "hex": "#C9D3DB" }, "$description": "僅裝飾分隔線與未選中色帶格，不可當輸入框邊框" }
   },
   "font": {
     "$type": "fontFamily",
-    "display-zh": { "$value": ["Noto Serif TC", "PingFang TC", "serif"], "$description": "子集化，font-display: optional；只用於結論與標題" },
-    "display-num": { "$value": ["Source Serif 4", "Georgia", "serif"] },
+    "display-zh": { "$value": ["Noto Serif TC", "Source Han Serif TC", "Songti TC", "PMingLiU", "serif"], "$description": "系統襯線，不載入網頁字型；只用於結論與標題" },
+    "display-num": { "$value": ["Source Serif 4", "Georgia", "Noto Serif TC", "serif"] },
     "body": { "$value": ["PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "sans-serif"] },
     "mono": { "$value": ["ui-monospace", "Menlo", "Consolas", "monospace"] }
   },
@@ -34,6 +34,7 @@
   },
   "fontSize": {
     "$type": "dimension",
+    "xs": { "$value": { "value": 12, "unit": "px" }, "$description": "只用於圖表刻度、來源代號、頁尾" },
     "sm": { "$value": { "value": 14, "unit": "px" } },
     "md": { "$value": { "value": 16, "unit": "px" } },
     "lg": { "$value": { "value": 20, "unit": "px" } },
