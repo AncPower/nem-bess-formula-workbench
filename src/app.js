@@ -1,7 +1,7 @@
 /**
  * 頁面：一個網址、兩個分頁（#predispatch、#scenario）。兩個分頁共用同一份公式登記檔、變數目錄與計算引擎。
  *
- * 版面是「調度控制台」：上方電價曲線，中間分組輸入（一個畫面看完），下方公式卡片。
+ * 版面是「潮汐表」（docs/design.md）：先講結論（執行／等待），下方時段色帶與電價曲線，再往下是輸入與可收合的公式。
  * 輸入時即時預覽（input 事件，短暫延遲後重算並顯示「計算中」）；離開欄位或按 Enter（change 事件）才重建整頁，
  * 讓式子裡新出現的名稱長出輸入欄。
  */
@@ -14,6 +14,7 @@ import { best_single_cycle, fetch_report, parse_report } from "./predispatch.js"
 import { SUPPORTED_FUNCTIONS } from "./expression.js";
 import { build_chart_model, leg_range, parse_price_series, time_label } from "./price_series.js";
 import { render_price_chart } from "./price_chart.js";
+import { render_tide_strip } from "./tide_strip.js";
 import { GROUPS, SHORT_LABELS, TERMS, describe_expression, group_of, short_label } from "./formula_help.js";
 
 const TABS = ["predispatch", "scenario"];
@@ -22,7 +23,7 @@ const GUIDANCE_LABELS = { principle: "原則", method: "方法", how_to_choose: 
 const PREVIEW_DELAY_MS = 200;
 
 const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, data_status: null };
-const view = { results: new Map(), plain: new Map(), aggregates: new Map(), timer: null };
+const view = { results: new Map(), plain: new Map(), aggregates: new Map(), timer: null, decision: null };
 
 const element = (tag, attributes = {}, text) => {
   const node = document.createElement(tag);
@@ -77,6 +78,7 @@ function render() {
     if (link.dataset.tab === result.tab) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
+  render_verdict(result);
   render_data_bar(result.tab);
   render_chart(result);
   render_variables(result.variables.filter((variable) => result.used.has(variable.key)));
@@ -97,6 +99,7 @@ function refresh() {
     const variable = result.variables.find((entry) => entry.key === key);
     if (variable) input.value = String(variable.value);
   }
+  render_verdict(result);
   render_chart(result);
   set_status("done");
 }
@@ -112,6 +115,44 @@ function set_status(kind) {
   if (!node) return;
   node.setAttribute("class", `calc-status ${kind}`);
   node.textContent = kind === "busy" ? "計算中…" : `已更新 ${new Date().toLocaleTimeString("zh-TW", { hour12: false })}`;
+}
+
+const find_result = (results, id) => results.find((entry) => entry.id === id);
+const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+
+/** 結論列：首屏第一行先講答案（預調度：執行或等待；情境評估：目標期間收益），理由放在同一行的小字。 */
+function render_verdict({ tab, results, variables }) {
+  const node = document.getElementById("verdict");
+  if (!node) return;
+  const word = element("p", { class: "verdict-word" });
+  const why = element("p", { class: "verdict-why" });
+  if (tab === "predispatch") {
+    const decision = find_result(results, "dispatch_decision");
+    const spread = find_result(results, "spread");
+    const cycle = find_result(results, "cycle_net_revenue");
+    const daily = find_result(results, "daily_net_revenue");
+    const standard = variables.find((entry) => entry.key === "spread_standard");
+    if (!decision || decision.error) {
+      word.textContent = "無法判斷";
+      word.setAttribute("class", "verdict-word error");
+      why.textContent = decision?.error ?? "找不到「執行或等待」公式";
+    } else {
+      const go = decision.value !== 0;
+      word.textContent = go ? "執行" : "等待";
+      word.setAttribute("class", `verdict-word ${go ? "decision-go" : "decision-wait"}`);
+      const parts = [];
+      if (spread && !spread.error && standard) parts.push(`價差 ${plain_number(spread.value)} ${spread.value >= standard.value ? "≥" : "<"} 標準 ${plain_number(standard.value)} AUD/MWh`);
+      if (cycle && !cycle.error) parts.push(`每循環淨收益 ${format_value(cycle.value, "currency")}`);
+      if (daily && !daily.error) parts.push(`當日執行淨收益 ${format_value(daily.value, "currency")}`);
+      why.textContent = `${parts.join(" · ")}。結果是建議，不是預測。`;
+    }
+  } else {
+    const period = find_result(results, "period_revenue");
+    word.textContent = period && !period.error ? format_value(period.value, "currency") : "無法估算";
+    word.setAttribute("class", `verdict-word${period && !period.error ? "" : " error"}`);
+    why.textContent = period?.error ?? "目標期間收益：情境估算，不是預測。";
+  }
+  node.replaceChildren(word, why);
 }
 
 function render_data_bar(tab) {
@@ -143,7 +184,12 @@ function render_data_bar(tab) {
 function render_chart({ tab, results }) {
   const container = document.getElementById("price-chart");
   if (!container) return;
-  if (tab !== "predispatch") { container.setAttribute("hidden", ""); container.replaceChildren(); return; }
+  if (tab !== "predispatch") {
+    container.setAttribute("hidden", "");
+    container.replaceChildren();
+    document.getElementById("tide-strip")?.replaceChildren();
+    return;
+  }
   container.removeAttribute("hidden");
   if (!state.series) {
     container.replaceChildren(element("p", { class: "note" }, state.data_status?.loading ? "電價曲線讀取中…" : "讀到 AEMO 電價後，這裡會畫出實際電價、預調度電價與建議充放電時段。"));
@@ -151,7 +197,14 @@ function render_chart({ tab, results }) {
   }
   const decision = results.find((result) => result.id === "dispatch_decision");
   const label = decision && !decision.error ? format_value(decision.value, "decision") : null;
-  render_price_chart(container, build_chart_model(state.series, state.data.predispatch ?? null), { decision: label });
+  const model = build_chart_model(state.series, state.data.predispatch ?? null);
+  const strip = document.getElementById("tide-strip");
+  if (strip) {
+    const animate = view.decision !== null && label !== null && label !== view.decision;
+    render_tide_strip(strip, model, { decision: label, animate });
+  }
+  view.decision = label;
+  render_price_chart(container, model, { decision: label });
   if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有實際電價時段，只畫出預調度電價。"));
 }
 
@@ -176,7 +229,9 @@ function variable_field(variable) {
   const id = `var-${variable.key}`;
   const label_text = `${short_label(variable.label)}${variable.unit && variable.unit !== "—" ? `（${variable.unit}）` : ""}`;
   const help = [TERMS[variable.key]?.meaning, variable.hint].filter(Boolean).join("。");
-  wrapper.append(element("label", { for: id, title: help ? `${label_text}：${help}` : label_text }, label_text));
+  const label = element("label", { for: id }, label_text);
+  if (variable.origin === "user") label.append(element("span", { class: "changed" }, " • 已改"));
+  wrapper.append(label);
   const input = element("input", { id, type: "number", step: "any", value: String(variable.value) });
   if (variable.origin === "aggregate") { input.setAttribute("disabled", ""); view.aggregates.set(variable.key, input); }
   const apply = () => {
@@ -191,7 +246,7 @@ function variable_field(variable) {
   const origin_line = element("div", { class: "origin" }, `${origin} · `);
   origin_line.append(element("code", {}, variable.key));
   wrapper.append(origin_line);
-  if (help) wrapper.setAttribute("title", help);
+  if (help) wrapper.append(element("p", { class: "hint" }, help));
   return wrapper;
 }
 
@@ -343,5 +398,6 @@ async function start() {
 }
 
 start().catch((error) => {
+  document.getElementById("verdict")?.replaceChildren(element("p", { class: "verdict-word error" }, "無法載入"), element("p", { class: "verdict-why" }, error.message));
   document.getElementById("formula-list").replaceChildren(element("p", { class: "result error" }, error.message));
 });

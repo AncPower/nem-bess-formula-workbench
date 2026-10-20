@@ -8,43 +8,47 @@
 </head>
 <body>
   <header class="site-header">
-    <div class="title-row">
-      <h1>NEM BESS 公式工作台</h1>
-      <p class="tagline">公式、輸入與權重都能自己調整；結果是建議，不是預測。</p>
-    </div>
+    <h1>NEM BESS 公式工作台</h1>
     <nav class="tabs" aria-label="分頁">
       <a href="#predispatch" data-tab="predispatch">預調度</a>
       <a href="#scenario" data-tab="scenario">情境評估</a>
     </nav>
   </header>
   <main>
-    <div class="toolbar">
-      <section class="data-bar" id="data-bar" aria-live="polite"></section>
+    <section class="verdict-bar" aria-label="結論">
+      <div class="verdict" id="verdict" aria-live="polite"></div>
       <span class="calc-status" id="calc-status" role="status" aria-live="polite"></span>
-    </div>
-    <section class="panel chart-panel" id="price-chart" aria-label="電價曲線"></section>
-    <section class="panel inputs" aria-label="輸入">
-      <div class="panel-head">
-        <h2>輸入</h2>
-        <p class="note">打字時即時預覽；灰字是值的來源，滑鼠移到欄位上看白話說明。</p>
+    </section>
+    <section class="data-bar" id="data-bar" aria-live="polite"></section>
+    <section class="tide-section" aria-label="30 分鐘時段與電價">
+      <div id="tide-strip"></div>
+      <div class="chart-panel" id="price-chart"></div>
+    </section>
+    <section class="inputs" aria-labelledby="inputs-title">
+      <div class="section-head">
+        <h2 id="inputs-title">輸入</h2>
+        <p class="note">打字時即時預覽；每欄下方是白話說明與值的來源。</p>
         <button type="button" id="reset-all">全部還原預設</button>
       </div>
       <div class="var-groups" id="variable-list"></div>
     </section>
-    <details class="panel howto">
-      <summary>怎麼改公式（3 步）</summary>
-      <ol>
-        <li>每張卡片第一行是<strong>中文算式</strong>，下面的灰框是可以改的<strong>式子</strong>；底下的小方塊是<strong>代號對照</strong>（中文名稱、代號、目前值），點一下就把代號插入式子。</li>
-        <li>直接改式子，結果會即時預覽，右上角顯示「計算中…」再變成「已更新」。</li>
-        <li>想加新的輸入，就在式子裡打一個新名稱（小寫英文、數字、底線），按 Enter 或點別處，輸入區的「你新增的」會多一欄。</li>
-      </ol>
-      <p class="example">範例：每日扣掉固定費用 → 把「每日執行淨收益」改成 <code>executed_cycle_net_revenue - daily_fee</code>，再到輸入區填 <code>daily_fee</code>。改壞了按「還原建議式子」。</p>
+    <details class="formulas-wrap">
+      <summary><h2>公式</h2><span class="note">展開後可改寫式子、看原則與來源</span></summary>
+      <div class="howto">
+        <h3>怎麼改公式（3 步）</h3>
+        <ol>
+          <li>每條公式第一行是<strong>中文算式</strong>，下面的框是可以改的<strong>式子</strong>；底下的<strong>代號對照</strong>（中文名稱、代號、目前值）點一下就把代號插入式子。</li>
+          <li>直接改式子，結果即時預覽，結論列右側顯示「計算中…」再變成「已更新」。</li>
+          <li>想加新的輸入，就在式子裡打一個新名稱（小寫英文、數字、底線），按 Enter 或點別處，輸入區的「你新增的」會多一欄。</li>
+        </ol>
+        <p class="note">範例：每日扣掉固定費用 → 把「每日執行淨收益」改成 <code>executed_cycle_net_revenue - daily_fee</code>，再到輸入區填 <code>daily_fee</code>。改壞了按「還原建議式子」。</p>
+      </div>
+      <section class="formulas" id="formula-list" aria-label="公式"></section>
     </details>
-    <section class="formulas" id="formula-list" aria-label="公式"></section>
-    <section class="panel history" id="history-panel" aria-label="價差標準檢討" hidden></section>
+    <section class="history" id="history-panel" aria-label="價差標準檢討" hidden></section>
   </main>
   <footer class="site-footer">
-    <p>NSW1 · 市場時間 UTC+10（台灣時間＝市場時間 − 2 小時）· 只用公開資料：AEMO NEM 資料儀表板 30 分鐘電價</p>
+    <p>NSW1 · 市場時間 UTC+10（台北時間＝市場時間 − 2 小時）· 時段標記沿用 AEMO 慣例（時段結束時間）· 只用公開資料：AEMO NEM 資料儀表板 30 分鐘電價</p>
   </footer>
   <script type="module" src="src/app.js"></script>
 </body>

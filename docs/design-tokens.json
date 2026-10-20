@@ -3,48 +3,60 @@
   "color": {
     "$type": "color",
     "text": {
-      "primary": { "$value": { "colorSpace": "srgb", "components": [0.122, 0.161, 0.2], "hex": "#1f2933" } },
-      "muted": { "$value": { "colorSpace": "srgb", "components": [0.322, 0.376, 0.427], "hex": "#52606d" } }
+      "primary": { "$value": { "colorSpace": "srgb", "components": [0.071, 0.188, 0.31], "hex": "#12304F" } },
+      "muted": { "$value": { "colorSpace": "srgb", "components": [0.31, 0.392, 0.459], "hex": "#4F6475" }, "$description": "也用於輸入框邊框（≥3:1）" }
+    },
+    "tide": {
+      "low": { "$value": { "colorSpace": "srgb", "components": [0.122, 0.435, 0.545], "hex": "#1F6F8B" }, "$description": "充電、預調度線；禁止用於 14px 以下文字" },
+      "high": { "$value": { "colorSpace": "srgb", "components": [0.612, 0.184, 0.333], "hex": "#9C2F55" }, "$description": "放電、錯誤" }
     },
     "surface": {
-      "page": { "$value": { "colorSpace": "srgb", "components": [0.953, 0.961, 0.969], "hex": "#f3f5f7" } },
-      "panel": { "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff" } },
-      "line": { "$value": { "colorSpace": "srgb", "components": [0.851, 0.871, 0.89], "hex": "#d9dee3" } }
+      "page": { "$value": { "colorSpace": "srgb", "components": [0.957, 0.969, 0.976], "hex": "#F4F7F9" } },
+      "raised": { "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#FFFFFF" } }
     },
-    "market": {
-      "charge": { "$value": { "colorSpace": "srgb", "components": [0.043, 0.431, 0.31], "hex": "#0b6e4f" }, "$description": "充電、執行、主要按鈕" },
-      "charge-band": { "$value": { "colorSpace": "srgb", "components": [0.89, 0.937, 0.914], "hex": "#e3efe9" } },
-      "discharge": { "$value": { "colorSpace": "srgb", "components": [0.604, 0.275, 0], "hex": "#9a4600" } },
-      "discharge-band": { "$value": { "colorSpace": "srgb", "components": [0.984, 0.933, 0.867], "hex": "#fbeedd" } },
-      "forecast": { "$value": { "colorSpace": "srgb", "components": [0.231, 0.357, 0.647], "hex": "#3b5ba5" } }
+    "band": {
+      "low": { "$value": { "colorSpace": "srgb", "components": [0.863, 0.91, 0.933], "hex": "#DCE8EE" } },
+      "high": { "$value": { "colorSpace": "srgb", "components": [0.953, 0.882, 0.91], "hex": "#F3E1E8" } }
     },
-    "status": {
-      "error": { "$value": { "colorSpace": "srgb", "components": [0.706, 0.137, 0.094], "hex": "#b42318" } }
-    }
+    "rule": { "$value": { "colorSpace": "srgb", "components": [0.788, 0.827, 0.859], "hex": "#C9D3DB" }, "$description": "僅裝飾分隔線與未選中色帶格，不可當輸入框邊框" }
   },
   "font": {
-    "body": { "$type": "fontFamily", "$value": ["PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "system-ui", "sans-serif"] },
-    "mono": { "$type": "fontFamily", "$value": ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"] }
+    "$type": "fontFamily",
+    "display-zh": { "$value": ["Noto Serif TC", "Source Han Serif TC", "Songti TC", "PMingLiU", "serif"], "$description": "系統襯線，不載入網頁字型；只用於結論與標題" },
+    "display-num": { "$value": ["Source Serif 4", "Georgia", "Noto Serif TC", "serif"] },
+    "body": { "$value": ["PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "sans-serif"] },
+    "mono": { "$value": ["ui-monospace", "Menlo", "Consolas", "monospace"] }
   },
-  "font-size": {
-    "$type": "dimension",
-    "tick": { "$value": { "value": 12, "unit": "px" } },
-    "ui": { "$value": { "value": 14, "unit": "px" } },
-    "body": { "$value": { "value": 16, "unit": "px" } },
-    "result": { "$value": { "value": 24, "unit": "px" } }
-  },
-  "font-weight": {
+  "fontWeight": {
     "$type": "fontWeight",
     "regular": { "$value": 400 },
     "strong": { "$value": 600 }
+  },
+  "fontSize": {
+    "$type": "dimension",
+    "xs": { "$value": { "value": 12, "unit": "px" }, "$description": "只用於圖表刻度、來源代號、頁尾" },
+    "sm": { "$value": { "value": 14, "unit": "px" } },
+    "md": { "$value": { "value": 16, "unit": "px" } },
+    "lg": { "$value": { "value": 20, "unit": "px" } },
+    "xl": { "$value": { "value": 28, "unit": "px" } },
+    "hero": { "$value": { "value": 56, "unit": "px" } }
   },
   "space": {
     "$type": "dimension",
     "1": { "$value": { "value": 4, "unit": "px" } },
     "2": { "$value": { "value": 8, "unit": "px" } },
     "3": { "$value": { "value": 12, "unit": "px" } },
-    "4": { "$value": { "value": 16, "unit": "px" } }
+    "4": { "$value": { "value": 16, "unit": "px" } },
+    "section": { "$value": { "value": 24, "unit": "px" } },
+    "block": { "$value": { "value": 40, "unit": "px" } }
   },
-  "radius": { "$type": "dimension", "panel": { "$value": { "value": 6, "unit": "px" } } },
-  "motion": { "spinner": { "$type": "duration", "$value": { "value": 800, "unit": "ms" } } }
+  "radius": {
+    "$type": "dimension",
+    "control": { "$value": { "value": 4, "unit": "px" } },
+    "none": { "$value": { "value": 0, "unit": "px" } }
+  },
+  "motion": {
+    "tide-fill": { "$type": "duration", "$value": { "value": 240, "unit": "ms" } },
+    "tide-ease": { "$type": "cubicBezier", "$value": [0.2, 0.7, 0.2, 1] }
+  }
 }
