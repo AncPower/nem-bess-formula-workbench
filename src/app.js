@@ -46,11 +46,10 @@ function render() {
     value_overrides: state.value_overrides,
     expression_overrides: state.expression_overrides,
   };
-  const plan = tab === "predispatch" ? compute_day({ ...args, cycles: [state.data] }) : null;
-  const { variables, results } = plan ? {
-    variables: [...plan.cycles[0].variables, ...plan.daily.variables.filter((variable) => variable.origin === "aggregate")],
-    results: [...plan.cycles[0].results, ...plan.daily.results],
-  } : compute(args);
+  const base = compute(args);
+  const plan = compute_day({ ...args, cycles: [state.data] });
+  const variables = [...new Map([...base.variables, ...plan.cycles[0].variables, ...plan.daily.variables].map((variable) => [variable.key, variable])).values()];
+  const results = [...new Map([...base.results, ...plan.cycles[0].results, ...plan.daily.results].map((result) => [result.id, result])).values()];
   const visible = state.registry.formulas.filter((formula) => formula.page === tab || formula.page === "shared");
   const visible_results = visible.map((formula) => results.find((result) => result.id === formula.id));
   const used = new Set(visible_results.flatMap((result) => result.uses));
