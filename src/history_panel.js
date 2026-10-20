@@ -16,8 +16,11 @@ export function mount_history(bar, { registry, catalog, config }) {
   const add = (tag, text, parent = section) => { const node = document.createElement(tag); node.textContent = text; parent.append(node); return node; };
   add("h3", "價差標準檢討：歷史收益保留率");
   add("p", "事後電價檢討，不是最佳門檻或預測，不會建議上調。沿用原單循環窗口；效率與損耗試算不重新選窗，可能漏掉新參數下更好的機會。使用登記檔建議公式，不採用其他卡片的臨時改寫。");
+  const status = add("p", "讀取歷史摘要中…");
+  status.setAttribute("class", "loading");
   pending.then((summary) => {
-    add("p", `NSW1 · NEM 時間 UTC+10 · 資料 ${summary.period.start_date} 至 ${summary.period.end_date} · 產生 ${summary.generated_at} · ${summary.sources.length} 個 AEMO 月檔`);
+    status.removeAttribute("class");
+    status.textContent = `NSW1 · NEM 時間 UTC+10 · 資料 ${summary.period.start_date} 至 ${summary.period.end_date} · 產生 ${summary.generated_at} · ${summary.sources.length} 個 AEMO 月檔`;
     const inputs = {};
     for (const [key, label, type, value] of [
       ["start", "起日", "date", summary.period.start_date], ["end", "迄日", "date", summary.period.end_date],
@@ -49,5 +52,5 @@ export function mount_history(bar, { registry, catalog, config }) {
       } catch (error) { add("p", error.message, output); }
     };
     button.addEventListener("click", calculate); calculate();
-  }).catch((error) => add("p", error.message));
+  }).catch((error) => { status.setAttribute("class", "error"); status.textContent = error.message; });
 }
