@@ -3,12 +3,13 @@
  */
 
 import { compute } from "./engine.js";
+import { compute_day } from "./day.js";
 import { check_registry } from "./registry_check.js";
 import { best_single_cycle, fetch_report, parse_report } from "./predispatch.js";
 import { SUPPORTED_FUNCTIONS } from "./expression.js";
 
 const TABS = ["predispatch", "scenario"];
-const ORIGIN_LABELS = { user: "你調整的值", data: "預調度資料", config: "設定檔", default: "預設值" };
+const ORIGIN_LABELS = { user: "你調整的值", data: "預調度資料", config: "設定檔", default: "預設值", aggregate: "逐循環計算後自動加總（唯讀）" };
 const GUIDANCE_LABELS = { principle: "原則", method: "方法", how_to_choose: "建議怎麼選" };
 
 const state = { registry: null, catalog: null, config: {}, data: {}, value_overrides: {}, expression_overrides: {}, data_status: null };
@@ -38,13 +39,18 @@ function render() {
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
-  const { variables, results } = compute({
+  const args = {
     registry: state.registry,
     catalog: state.catalog,
     context: { config: state.config, data: state.data },
     value_overrides: state.value_overrides,
     expression_overrides: state.expression_overrides,
-  });
+  };
+  const plan = tab === "predispatch" ? compute_day({ ...args, cycles: [state.data] }) : null;
+  const { variables, results } = plan ? {
+    variables: [...plan.cycles[0].variables, ...plan.daily.variables.filter((variable) => variable.origin === "aggregate")],
+    results: [...plan.cycles[0].results, ...plan.daily.results],
+  } : compute(args);
   const visible = state.registry.formulas.filter((formula) => formula.page === tab || formula.page === "shared");
   const visible_results = visible.map((formula) => results.find((result) => result.id === formula.id));
   const used = new Set(visible_results.flatMap((result) => result.uses));
@@ -79,6 +85,7 @@ function render_variables(variables) {
     const id = `var-${variable.key}`;
     wrapper.append(element("label", { for: id }, `${variable.label}${variable.unit && variable.unit !== "—" ? `（${variable.unit}）` : ""}`));
     const input = element("input", { id, type: "number", step: "any", value: String(variable.value) });
+    if (variable.origin === "aggregate") input.setAttribute("disabled", "");
     input.addEventListener("change", () => {
       const value = Number(input.value);
       if (input.value === "" || !Number.isFinite(value)) delete state.value_overrides[variable.key];
@@ -100,6 +107,7 @@ function render_formulas(formulas, results) {
     const card = element("article", { class: "card" });
     const header = element("header");
     header.append(element("h3", {}, formula.name));
+    if (formula.scope === "cycle" || formula.scope === "daily") header.append(element("span", { class: "note" }, formula.scope === "cycle" ? "每循環" : "每日彙總（目前單循環計畫）"));
     if (result.error) header.append(element("div", { class: "result error" }, result.error));
     else {
       const decision = formula.format === "decision" ? (result.value !== 0 ? " decision-go" : " decision-wait") : "";
