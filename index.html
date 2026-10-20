@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NEM BESS 公式工作台</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>NEM BESS 公式工作台</h1>
+    <p class="tagline">公式、輸入與權重都能自己調整；結果是建議，不是預測。</p>
+    <nav class="tabs" aria-label="分頁">
+      <a href="#predispatch" data-tab="predispatch">預調度</a>
+      <a href="#scenario" data-tab="scenario">情境評估</a>
+    </nav>
+  </header>
+  <main>
+    <section class="data-bar" id="data-bar" aria-live="polite"></section>
+    <div class="layout">
+      <aside class="variables" aria-label="輸入">
+        <h2>輸入</h2>
+        <p class="note">改一個值，所有用到它的公式一起更新。灰字標示來源。</p>
+        <div id="variable-list"></div>
+        <button type="button" id="reset-all">全部還原預設</button>
+      </aside>
+      <section class="formulas" id="formula-list" aria-label="公式"></section>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <p>NSW1 · 市場時間 UTC+10（台灣時間＝市場時間 − 2 小時）· 只用公開資料</p>
+  </footer>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

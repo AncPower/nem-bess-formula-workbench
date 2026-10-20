@@ -1,0 +1,38 @@
+:root { --ink: #1f2933; --muted: #616e7c; --line: #d9dee3; --accent: #0b6e4f; --warn: #b42318; --bg: #fafbfc; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, "Noto Sans TC", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.6; }
+.site-header { padding: 1.25rem 1.5rem 0; border-bottom: 1px solid var(--line); background: #fff; }
+.site-header h1 { margin: 0; font-size: 1.4rem; }
+.tagline { margin: 0.25rem 0 0.75rem; color: var(--muted); }
+.tabs { display: flex; gap: 0.25rem; }
+.tabs a { padding: 0.5rem 1rem; text-decoration: none; color: var(--muted); border-bottom: 3px solid transparent; }
+.tabs a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+main { padding: 1rem 1.5rem; }
+.data-bar { margin-bottom: 1rem; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.data-bar .error { color: var(--warn); }
+.layout { display: grid; grid-template-columns: minmax(16rem, 22rem) 1fr; gap: 1.5rem; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.variables { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 1rem; position: sticky; top: 1rem; }
+.variables h2, .formulas h2 { margin: 0 0 0.5rem; font-size: 1.1rem; }
+.note { color: var(--muted); font-size: 0.875rem; margin: 0 0 0.75rem; }
+.variable { margin-bottom: 0.75rem; }
+.variable label { display: block; font-weight: 500; }
+.variable input { width: 100%; padding: 0.35rem 0.5rem; border: 1px solid var(--line); border-radius: 4px; font: inherit; }
+.variable .origin { color: var(--muted); font-size: 0.8rem; }
+.variable.overridden input { border-color: var(--accent); }
+.formulas { display: grid; gap: 1rem; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.25rem; }
+.card header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.card h3 { margin: 0; font-size: 1.05rem; }
+.result { font-size: 1.6rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.result.decision-go { color: var(--accent); }
+.result.decision-wait { color: var(--muted); }
+.result.error { font-size: 1rem; color: var(--warn); }
+.card textarea { width: 100%; font: 0.95rem ui-monospace, monospace; padding: 0.5rem; border: 1px solid var(--line); border-radius: 4px; margin: 0.5rem 0; resize: vertical; }
+.card .edited { color: var(--accent); font-size: 0.8rem; }
+.guidance dt { font-weight: 600; margin-top: 0.5rem; }
+.guidance dd { margin: 0; color: var(--ink); }
+.guidance ul { margin: 0.25rem 0 0; padding-left: 1.25rem; }
+button { font: inherit; padding: 0.35rem 0.85rem; border: 1px solid var(--line); border-radius: 4px; background: #fff; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+.site-footer { padding: 1rem 1.5rem; color: var(--muted); font-size: 0.85rem; }
