@@ -1,5 +1,5 @@
 /**
- * 電價曲線圖（SVG）：實際電價實線、預調度電價虛線、建議充電段與放電段色帶、實際與預測分界線。
+ * 電價曲線圖（SVG，放在潮汐色帶下方當理由）：實際電價實線、預調度電價虛線、建議充電段與放電段色帶、實際與預測分界線。
  * 只用 DOM API 產生節點，不載入圖表套件。
  */
 
@@ -7,7 +7,7 @@ import { date_time_label, time_label } from "./price_series.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WIDTH = 1240;
-const HEIGHT = 250;
+const HEIGHT = 200;
 const PAD = { top: 34, right: 16, bottom: 30, left: 56 };
 
 const svg = (tag, attributes = {}, text) => {
