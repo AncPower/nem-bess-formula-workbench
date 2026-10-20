@@ -20,9 +20,10 @@ export function read_path(root, path) {
  * @param {{config?: object, data?: object}} [args.context] 設定檔與資料轉接的值
  * @param {Record<string, number>} [args.value_overrides] 使用者覆寫的變數值
  * @param {Record<string, string>} [args.expression_overrides] 使用者改寫的式子
+ * @param {Record<string, string>} [args.variable_errors] Invalid upstream inputs
  * @returns {{variables: object[], results: object[]}} 每個變數的值與來源、每條公式的結果
  */
-export function compute({ registry, catalog, context = {}, value_overrides = {}, expression_overrides = {} }) {
+export function compute({ registry, catalog, context = {}, value_overrides = {}, expression_overrides = {}, variable_errors = {} }) {
   const formula_ids = new Set(registry.formulas.map((formula) => formula.id));
   const parsed = new Map();
   for (const formula of registry.formulas) {
@@ -56,6 +57,12 @@ export function compute({ registry, catalog, context = {}, value_overrides = {},
     const item = parsed.get(id);
     if (visiting.has(id)) return finish(id, formula, item, null, "公式互相引用，形成循環");
     if (item.error) return finish(id, formula, item, null, item.error);
+    const cross_scope = item.uses.find((name) =>
+      (formula_ids.has(name) && registry.formulas.find((entry) => entry.id === name).scope !== formula.scope) ||
+      (Object.hasOwn(registry.aggregates ?? {}, name) && formula.scope !== "daily"));
+    if (cross_scope) return finish(id, formula, item, null, `不可跨計算層級引用「${cross_scope}」`);
+    const invalid = item.uses.find((name) => Object.hasOwn(variable_errors, name));
+    if (invalid) return finish(id, formula, item, null, variable_errors[invalid]);
     visiting.add(id);
     for (const name of item.uses) {
       if (formula_ids.has(name)) {

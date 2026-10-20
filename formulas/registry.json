@@ -1,8 +1,12 @@
 {
   "schema_version": 1,
+  "aggregates": {
+    "executed_cycle_net_revenue": { "formula": "cycle_net_revenue", "when": "dispatch_decision" }
+  },
   "formulas": [
     {
       "id": "spread",
+      "scope": "cycle",
       "name": "價差",
       "page": "shared",
       "unit": "AUD/MWh",
@@ -26,6 +30,7 @@
     },
     {
       "id": "cycle_net_revenue",
+      "scope": "cycle",
       "name": "每循環淨收益",
       "page": "shared",
       "unit": "AUD",
@@ -49,6 +54,7 @@
     },
     {
       "id": "dispatch_decision",
+      "scope": "cycle",
       "name": "執行或等待",
       "page": "predispatch",
       "unit": "",
@@ -68,6 +74,7 @@
     },
     {
       "id": "factor_multiplier",
+      "scope": "scenario",
       "name": "因素調整倍數",
       "page": "scenario",
       "unit": "倍",
@@ -91,6 +98,7 @@
     },
     {
       "id": "period_revenue",
+      "scope": "scenario",
       "name": "目標期間收益",
       "page": "scenario",
       "unit": "AUD",
@@ -109,6 +117,23 @@
             "title": "Modo：NEM 電池收益回顧 2025-26 夏季",
             "url": "https://modoenergy.com/research/australia-nem-bess-revenues-summer-2025-26-review"
           }
+        ]
+      }
+    },
+    {
+      "id": "daily_net_revenue",
+      "scope": "daily",
+      "name": "每日執行淨收益",
+      "page": "predispatch",
+      "unit": "AUD",
+      "format": "currency",
+      "expression": "executed_cycle_net_revenue",
+      "guidance": {
+        "principle": "每日淨收益只加總判斷為執行的循環；等待的循環不計入。",
+        "method": "先逐循環計算淨收益與執行判斷，再將已執行循環的淨收益加總。MVP 僅接一個循環。",
+        "how_to_choose": "這是目前單循環計畫的彙總，不是完整市場日的最佳化收益，也不是情境評估的歷史每日收益分位數；情境輸入仍由使用者設定。",
+        "sources": [
+          { "title": "AEMO 損失係數", "url": "https://www.aemo.com.au/energy-systems/electricity/national-electricity-market-nem/market-operations/loss-factors-and-regional-boundaries" }
         ]
       }
     }
