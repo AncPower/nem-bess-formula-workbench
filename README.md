@@ -4,12 +4,14 @@
 
 結果是**建議，不是預測**。
 
+**直接使用：<https://ancpower.github.io/nem-bess-formula-workbench/>**。不需要安裝、帳號或在本機執行專案，用瀏覽器打開就能用；你調整的式子與數值只存在自己的畫面上，不會影響別人。
+
 ## 一個網址、兩個分頁
 
 | 分頁 | 網址 | 給誰 | 回答什麼 |
 |---|---|---|---|
-| 預調度 | `#predispatch`（預設） | 交易或調度人員，每天多次 | 依最新預調度電價，今天要執行還是等待、這個循環能賺多少 |
-| 情境評估 | `#scenario` | 營運主管、決策者，每週或每月 | 價差標準要不要調、目標期間大概能賺多少 |
+| 預調度 | [`#predispatch`](https://ancpower.github.io/nem-bess-formula-workbench/#predispatch)（預設） | 交易或調度人員，每天多次 | 依最新預調度電價，今天要執行還是等待、這個循環能賺多少 |
+| 情境評估 | [`#scenario`](https://ancpower.github.io/nem-bess-formula-workbench/#scenario) | 營運主管、決策者，每週或每月 | 價差標準要不要調、目標期間大概能賺多少 |
 
 兩個分頁共用同一份公式登記檔、變數目錄、計算引擎與設備參數。
 
