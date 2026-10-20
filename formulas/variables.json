@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "variables": [
+    { "key": "charge_price", "label": "充電段均價", "unit": "AUD/MWh", "default": 40, "source": { "type": "data", "ref": "predispatch.charge_average_price" }, "hint": "讀到預調度電價時，自動帶入最佳充電段的均價" },
+    { "key": "discharge_price", "label": "放電段均價", "unit": "AUD/MWh", "default": 180, "source": { "type": "data", "ref": "predispatch.discharge_average_price" }, "hint": "讀到預調度電價時，自動帶入最佳放電段的均價" },
+    { "key": "power_mw", "label": "功率", "unit": "MW", "default": 5, "source": { "type": "config", "ref": "battery.power_mw" } },
+    { "key": "capacity_mwh", "label": "容量", "unit": "MWh", "default": 20, "source": { "type": "config", "ref": "battery.capacity_mwh" } },
+    { "key": "rte", "label": "來回效率", "unit": "0–1", "default": 1, "source": { "type": "config", "ref": "battery.round_trip_efficiency" } },
+    { "key": "degradation_cost", "label": "每 MWh 損耗成本", "unit": "AUD/MWh", "default": 0, "source": { "type": "config", "ref": "battery.degradation_cost_aud_per_mwh" } },
+    { "key": "mlf", "label": "邊際損失係數（Marginal Loss Factor, MLF）", "unit": "0–1", "default": 1, "source": { "type": "config", "ref": "battery.marginal_loss_factor" } },
+    { "key": "spread_standard", "label": "價差標準", "unit": "AUD/MWh", "default": 0, "source": { "type": "config", "ref": "spread_standard.spread_standard_aud_per_mwh" } },
+    { "key": "days", "label": "目標期間天數", "unit": "天", "default": 90, "source": { "type": "user" } },
+    { "key": "availability", "label": "可用率", "unit": "0–1", "default": 0.95, "source": { "type": "user" }, "hint": "扣掉維修、通訊中斷等無法調度的天數" },
+    { "key": "daily_revenue", "label": "每日淨收益（選定分位數）", "unit": "AUD/天", "default": 2651, "source": { "type": "user" }, "hint": "預設值是上游分析 2024-07 至 2026-08、5 MW／20 MWh 的每日收益中位數；換成 P10 或 P90 即得對應情境" },
+    { "key": "w_demand", "label": "權重：需求", "unit": "—", "default": 1, "source": { "type": "user" } },
+    { "key": "w_supply", "label": "權重：供給餘裕", "unit": "—", "default": 1, "source": { "type": "user" } },
+    { "key": "w_battery", "label": "權重：電池容量成長", "unit": "—", "default": 1, "source": { "type": "user" } },
+    { "key": "idx_demand", "label": "指數：需求（相對參考期間）", "unit": "倍", "default": 1, "source": { "type": "user" } },
+    { "key": "idx_supply", "label": "指數：供給吃緊程度（相對參考期間）", "unit": "倍", "default": 1, "source": { "type": "user" } },
+    { "key": "idx_battery", "label": "指數：電池價差保留（相對參考期間）", "unit": "倍", "default": 1, "source": { "type": "user" }, "hint": "新電池上線會壓縮價差；小於 1 代表價差被壓縮" }
+  ]
+}

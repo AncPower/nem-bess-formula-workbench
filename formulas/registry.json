@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "formulas": [
+    {
+      "id": "spread",
+      "name": "價差",
+      "page": "shared",
+      "unit": "AUD/MWh",
+      "format": "number",
+      "expression": "discharge_price - charge_price",
+      "guidance": {
+        "principle": "價差是電池套利唯一的收益來源：低價充電、高價放電。每段長度＝容量 ÷ 功率，連續、滿功率。",
+        "method": "預調度頁從 AEMO 30 分鐘預調度電價中，找出先充後放、淨收益最大的一組時段，取兩段的均價相減。",
+        "how_to_choose": "要比較不同天或不同電池，先固定每段長度；長度改變時，價差的意義也會改變。",
+        "sources": [
+          {
+            "title": "AEMO NEM 資料儀表板",
+            "url": "https://aemo.com.au/en/energy-systems/electricity/national-electricity-market-nem/data-nem/data-dashboard-nem"
+          },
+          {
+            "title": "NEM 電池價差一年跌 85%（Energy-Storage.News）",
+            "url": "https://www.energy-storage.news/nem-battery-price-spreads-fall-85-in-a-year-as-australias-grid-scale-bess-fleet-passes-9000mw/"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cycle_net_revenue",
+      "name": "每循環淨收益",
+      "page": "shared",
+      "unit": "AUD",
+      "format": "currency",
+      "expression": "capacity_mwh * mlf * (rte * discharge_price - charge_price) - capacity_mwh * rte * degradation_cost",
+      "guidance": {
+        "principle": "充電量＝容量；放電量＝充電量 × 來回效率。充放電結算都乘上 MLF，每 MWh 放電扣損耗成本。",
+        "method": "淨收益＝充電量 × MLF ×（來回效率 × 放電均價 − 充電均價）− 放電量 × 損耗成本。",
+        "how_to_choose": "來回效率用廠商規格或實測值，常見 0.85–0.90；MLF 用 AEMO 公布的接點係數，每年更新。",
+        "sources": [
+          {
+            "title": "AEMO 損失係數",
+            "url": "https://www.aemo.com.au/energy-systems/electricity/national-electricity-market-nem/market-operations/loss-factors-and-regional-boundaries"
+          },
+          {
+            "title": "Modo：2026-27 MLF 草案分析",
+            "url": "https://modoenergy.com/research/australia-nem-draft-26-27-mlfs-marginal-loss-factors-bess-solar"
+          }
+        ]
+      }
+    },
+    {
+      "id": "dispatch_decision",
+      "name": "執行或等待",
+      "page": "predispatch",
+      "unit": "",
+      "format": "decision",
+      "expression": "and(spread >= spread_standard, cycle_net_revenue > 0)",
+      "guidance": {
+        "principle": "價差達到標準、而且淨收益為正才放電，否則等待。結果 1 代表執行，0 代表等待。",
+        "method": "價差標準由情境評估分頁定期檢討；調整設定檔時開 PR，附上檢討結果。",
+        "how_to_choose": "標準設越高，執行天數越少、錯過的收益越多；設越低，遇到預測誤差時越容易虧損。",
+        "sources": [
+          {
+            "title": "AEMC：2026-27 市場價格上限",
+            "url": "https://www.aemc.gov.au/news-centre/media-releases/aemc-updates-market-price-cap-2026-27"
+          }
+        ]
+      }
+    },
+    {
+      "id": "factor_multiplier",
+      "name": "因素調整倍數",
+      "page": "scenario",
+      "unit": "倍",
+      "format": "number",
+      "expression": "(w_demand * idx_demand + w_supply * idx_supply + w_battery * idx_battery) / (w_demand + w_supply + w_battery)",
+      "guidance": {
+        "principle": "以加權平均把各因素相對參考期間的變化，換算成單一收益倍數；所有指數都是 1 時倍數為 1，即沿用參考期間。",
+        "method": "權重與指數都由使用者設定。權重只看相對大小，總和不必為 1。",
+        "how_to_choose": "⚠️ 上游分析以六個因素擬合每日收益，R² 約 0.46，解釋力有限；權重先當作情境假設，不當作預測。電池價差保留通常最關鍵，新電池上線會壓縮價差。",
+        "sources": [
+          {
+            "title": "AEMO QED Q2 2026",
+            "url": "https://www.aemo.com.au/newsroom/media-release/qed-q2-2026"
+          },
+          {
+            "title": "Modo：NEM 電池建置報告 Q2 2026",
+            "url": "https://modoenergy.com/research/fr/australia-nem-bess-buildout-q2-2026"
+          }
+        ]
+      }
+    },
+    {
+      "id": "period_revenue",
+      "name": "目標期間收益",
+      "page": "scenario",
+      "unit": "AUD",
+      "format": "currency",
+      "expression": "days * availability * daily_revenue * factor_multiplier",
+      "guidance": {
+        "principle": "期間收益＝天數 × 可用率 × 每日淨收益 × 因素調整倍數。每日淨收益輸入 P10、P50、P90，就得到對應的情境。",
+        "method": "每日淨收益取自近期參考期間的分布，只取型態、不外推價格水準。",
+        "how_to_choose": "參考期間建議取近 6–12 個月；更早的價格來自電池少得多的市場，會高估收益。目標期間不要超過 2029 年 4 月 Eraring 退場。",
+        "sources": [
+          {
+            "title": "Origin 延長 Eraring 營運至 2029（pv magazine）",
+            "url": "https://www.pv-magazine-australia.com/press-releases/origin-extends-eraring-power-station-operations-to-2029"
+          },
+          {
+            "title": "Modo：NEM 電池收益回顧 2025-26 夏季",
+            "url": "https://modoenergy.com/research/australia-nem-bess-revenues-summer-2025-26-review"
+          }
+        ]
+      }
+    }
+  ]
+}
