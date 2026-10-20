@@ -18,7 +18,19 @@
       "low": { "$value": { "colorSpace": "srgb", "components": [0.863, 0.91, 0.933], "hex": "#DCE8EE" } },
       "high": { "$value": { "colorSpace": "srgb", "components": [0.953, 0.882, 0.91], "hex": "#F3E1E8" } }
     },
-    "rule": { "$value": { "colorSpace": "srgb", "components": [0.788, 0.827, 0.859], "hex": "#C9D3DB" }, "$description": "僅裝飾分隔線與未選中色帶格，不可當輸入框邊框" }
+    "category": {
+      "price": { "$value": { "colorSpace": "srgb", "components": [0.882, 0.918, 0.957], "hex": "#E1EAF4" }, "$description": "公式名稱框框：電價" },
+      "battery": { "$value": { "colorSpace": "srgb", "components": [0.89, 0.929, 0.867], "hex": "#E3EDDD" }, "$description": "公式名稱框框：設備" },
+      "rule": { "$value": { "colorSpace": "srgb", "components": [0.957, 0.91, 0.831], "hex": "#F4E8D4" }, "$description": "公式名稱框框：判斷與彙總" },
+      "scenario": { "$value": { "colorSpace": "srgb", "components": [0.925, 0.894, 0.949], "hex": "#ECE4F2" }, "$description": "公式名稱框框：情境假設" },
+      "custom": { "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#FFFFFF" }, "$description": "你新增的變數，虛線框" },
+      "result": { "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#FFFFFF" }, "$description": "計算結果，主色實線框" },
+      "price-edge": { "$value": { "colorSpace": "srgb", "components": [0.616, 0.71, 0.812], "hex": "#9DB5CF" } },
+      "battery-edge": { "$value": { "colorSpace": "srgb", "components": [0.639, 0.745, 0.584], "hex": "#A3BE95" } },
+      "rule-edge": { "$value": { "colorSpace": "srgb", "components": [0.824, 0.725, 0.553], "hex": "#D2B98D" } },
+      "scenario-edge": { "$value": { "colorSpace": "srgb", "components": [0.725, 0.647, 0.796], "hex": "#B9A5CB" } }
+    },
+    "rule": { "$value": { "colorSpace": "srgb", "components": [0.788, 0.827, 0.859], "hex": "#C9D3DB" }, "$description": "僅裝飾分隔線與圖表格線，不可當輸入框邊框" }
   },
   "font": {
     "$type": "fontFamily",
@@ -53,10 +65,11 @@
   "radius": {
     "$type": "dimension",
     "control": { "$value": { "value": 4, "unit": "px" } },
+    "chip": { "$value": { "value": 4, "unit": "px" } },
     "none": { "$value": { "value": 0, "unit": "px" } }
   },
   "motion": {
-    "tide-fill": { "$type": "duration", "$value": { "value": 240, "unit": "ms" } },
+    "power-fill": { "$type": "duration", "$value": { "value": 240, "unit": "ms" } },
     "tide-ease": { "$type": "cubicBezier", "$value": [0.2, 0.7, 0.2, 1] }
   }
 }
