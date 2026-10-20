@@ -20,18 +20,18 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     const load = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url)));
     const sample = build({ region_id: "NSW1", start_date: "2026-07-01", end_date: "2026-07-01", sources: [{ url: "https://nemweb.com.au/test" }], prices: Array.from({ length: 288 }, (_, index) => [new Date(Date.parse("2026-07-01") + (index + 1) * 300000).toISOString().slice(0, 16), index < 144 ? 40 : 180]) }, load("formulas/registry.json"), load("formulas/variables.json"), load("config/battery.json"));
     sample.input_fingerprint = await fingerprint();
-    const ids = Object.fromEntries(["data-bar", "variable-list", "formula-list", "reset-all"].map((id) => [id, new Node("div")]));
+    const ids = Object.fromEntries(["data-bar", "price-chart", "calc-status", "history-panel", "variable-list", "formula-list", "reset-all"].map((id) => [id, new Node("div")]));
     const links = ["predispatch", "scenario"].map((tab) => { const link = new Node("a"); link.dataset.tab = tab; return link; });
     const events = {};
-    globalThis.document = { createElement: (tag) => new Node(tag), getElementById: (id) => ids[id], querySelectorAll: () => links };
+    globalThis.document = { createElement: (tag) => new Node(tag), createElementNS: (_, tag) => new Node(tag), getElementById: (id) => ids[id], querySelectorAll: () => links };
     globalThis.window = { addEventListener: (event, handler) => { events[event] = handler; } };
     globalThis.location = { hash: "#predispatch" };
     globalThis.fetch = async (path) => ({
       ok: true,
       arrayBuffer: async () => { const bytes = readFileSync(new URL(`../${path}`, import.meta.url)); return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); },
-      json: async () => path.startsWith("https:") ? { "5MIN": Array.from({ length: 16 }, (_, index) => ({
+      json: async () => path.startsWith("https:") ? { "5MIN": [...Array.from({ length: 16 }, (_, index) => ({
         REGIONID: "NSW1", PERIODTYPE: "FORECAST", SETTLEMENTDATE: `2026-10-21T${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}:00`, RRP: index < 8 ? 40 : 180,
-      })) } : path === "data/daily_summary.json" ? sample : JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8")),
+      })), { REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: "2026-10-20T23:00:00", RRP: 95 }, { REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: "2026-10-20T23:30:00", RRP: 88 }] } : path === "data/daily_summary.json" ? sample : JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8")),
     });
     await import("../src/app.js");
     await flush();
@@ -40,6 +40,23 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     const input = (key) => descendants(ids["variable-list"]).find((node) => node.attributes.id === `var-${key}`);
     assert.equal(result("每日執行淨收益"), "A$ 2,800");
     assert.equal(input("executed_cycle_net_revenue").attributes.disabled, "");
+    const chart = descendants(ids["price-chart"]);
+    for (const kind of ["line-actual", "line-forecast", "band-charge", "band-discharge", "boundary"]) assert.ok(chart.some((node) => node.attributes.class === kind), `曲線圖缺少 ${kind}`);
+    assert.ok(chart.some((node) => node.textContent === "放電（執行） A$ 180"));
+    assert.ok(descendants(ids["data-bar"]).some((node) => /實際 2 個、預調度 16 個.*充電 00:00 到 03:30、放電 04:00 到 07:30/.test(node.textContent)));
+    assert.equal(descendants(card("價差")).find((node) => node.attributes.class === "plain-formula").textContent, "放電段均價 − 充電段均價");
+    const chip = descendants(card("價差")).find((node) => node.attributes.class === "chip" && descendants(node).some((child) => child.tag === "code" && child.textContent === "discharge_price"));
+    assert.ok(chip, "代號對照要列出式子用到的代號");
+    assert.deepEqual(descendants(chip).slice(1).map((node) => node.textContent), ["放電段均價", "discharge_price", "＝180"]);
+    input("spread_standard").value = "141"; input("spread_standard").listeners.input();
+    assert.equal(ids["calc-status"].textContent, "計算中…");
+    assert.equal(result("執行或等待"), "執行", "預覽延遲期間不重算");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(result("執行或等待"), "等待");
+    assert.match(ids["calc-status"].textContent, /^已更新/);
+    assert.ok(input("spread_standard"), "即時預覽不重建輸入欄");
+    assert.ok(descendants(ids["price-chart"]).some((node) => node.textContent === "放電（等待） A$ 180"));
+    ids["reset-all"].listeners.click();
     const daily_expression = descendants(card("每日執行淨收益")).find((node) => node.tag === "textarea");
     daily_expression.value = "executed_cycle_net_revenue - daily_fee"; daily_expression.listeners.change();
     assert.ok(input("daily_fee"), "每日式子新增的變數也必須有輸入欄");
@@ -51,19 +68,21 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     assert.equal(result("執行或等待"), "等待");
     assert.equal(result("每日執行淨收益"), "A$ 0");
     location.hash = "#scenario"; events.hashchange();
+    assert.equal(ids["price-chart"].attributes.hidden, "");
     await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.ok(descendants(ids["data-bar"]).some((node) => node.textContent === "試算：維持"));
-    descendants(ids["data-bar"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "141";
-    descendants(ids["data-bar"]).find((node) => node.textContent === "重新試算").listeners.click();
-    assert.ok(descendants(ids["data-bar"]).some((node) => node.textContent === "試算：建議下調"));
-    descendants(ids["data-bar"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "0";
-    descendants(ids["data-bar"]).find((node) => node.textContent === "重新試算").listeners.click();
-    assert.ok(descendants(ids["data-bar"]).some((node) => node.textContent === "試算：維持"));
+    assert.ok(descendants(ids["history-panel"]).some((node) => node.textContent === "試算：維持"));
+    descendants(ids["history-panel"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "141";
+    descendants(ids["history-panel"]).find((node) => node.textContent === "重新試算").listeners.click();
+    assert.ok(descendants(ids["history-panel"]).some((node) => node.textContent === "試算：建議下調"));
+    descendants(ids["history-panel"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "0";
+    descendants(ids["history-panel"]).find((node) => node.textContent === "重新試算").listeners.click();
+    assert.ok(descendants(ids["history-panel"]).some((node) => node.textContent === "試算：維持"));
     assert.equal(card("每日執行淨收益"), undefined);
     assert.equal(input("daily_revenue").value, "2651");
     input("daily_revenue").value = "100"; input("daily_revenue").listeners.change();
     assert.equal(result("目標期間收益"), "A$ 8,550");
     location.hash = "#predispatch"; events.hashchange();
+    assert.equal(ids["history-panel"].attributes.hidden, "");
     const expression = descendants(card("價差")).find((node) => node.tag === "textarea");
     expression.value = "("; expression.listeners.change();
     assert.match(result("每日執行淨收益"), /無法彙總/);
