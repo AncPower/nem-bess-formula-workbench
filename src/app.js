@@ -4,6 +4,7 @@
 
 import { compute } from "./engine.js";
 import { compute_day } from "./day.js";
+import { mount_history } from "./history_panel.js";
 import { check_registry } from "./registry_check.js";
 import { best_single_cycle, fetch_report, parse_report } from "./predispatch.js";
 import { SUPPORTED_FUNCTIONS } from "./expression.js";
@@ -63,6 +64,7 @@ function render_data_bar(tab) {
   bar.replaceChildren();
   if (tab !== "predispatch") {
     bar.append(element("span", { class: "note" }, "情境評估：每日淨收益先手動輸入；歷史每日收益資料接入後會自動帶入參考期間的分位數。"));
+    mount_history(bar, state);
     return;
   }
   const button = element("button", { type: "button" }, "讀取 AEMO 預調度電價");

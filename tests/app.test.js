@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { build, fingerprint } from "../analysis/build.mjs";
 
 class Node {
   constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.listeners = {}; this.dataset = {}; this.textContent = ""; }
@@ -16,6 +17,9 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
  test("實際 app 串接：單循環、每日卡片、調參、分頁、錯誤與還原", async () => {
   const saved = Object.fromEntries(["document", "window", "location", "fetch"].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   try {
+    const load = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url)));
+    const sample = build({ region_id: "NSW1", start_date: "2026-07-01", end_date: "2026-07-01", sources: [{ url: "https://nemweb.com.au/test" }], prices: Array.from({ length: 288 }, (_, index) => [new Date(Date.parse("2026-07-01") + (index + 1) * 300000).toISOString().slice(0, 16), index < 144 ? 40 : 180]) }, load("formulas/registry.json"), load("formulas/variables.json"), load("config/battery.json"));
+    sample.input_fingerprint = await fingerprint();
     const ids = Object.fromEntries(["data-bar", "variable-list", "formula-list", "reset-all"].map((id) => [id, new Node("div")]));
     const links = ["predispatch", "scenario"].map((tab) => { const link = new Node("a"); link.dataset.tab = tab; return link; });
     const events = {};
@@ -24,9 +28,10 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     globalThis.location = { hash: "#predispatch" };
     globalThis.fetch = async (path) => ({
       ok: true,
+      arrayBuffer: async () => { const bytes = readFileSync(new URL(`../${path}`, import.meta.url)); return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); },
       json: async () => path.startsWith("https:") ? { "5MIN": Array.from({ length: 16 }, (_, index) => ({
         REGIONID: "NSW1", PERIODTYPE: "FORECAST", SETTLEMENTDATE: `2026-10-21T${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}:00`, RRP: index < 8 ? 40 : 180,
-      })) } : JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8")),
+      })) } : path === "data/daily_summary.json" ? sample : JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8")),
     });
     await import("../src/app.js");
     await flush();
@@ -46,6 +51,14 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     assert.equal(result("執行或等待"), "等待");
     assert.equal(result("每日執行淨收益"), "A$ 0");
     location.hash = "#scenario"; events.hashchange();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.ok(descendants(ids["data-bar"]).some((node) => node.textContent === "試算：維持"));
+    descendants(ids["data-bar"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "141";
+    descendants(ids["data-bar"]).find((node) => node.textContent === "重新試算").listeners.click();
+    assert.ok(descendants(ids["data-bar"]).some((node) => node.textContent === "試算：建議下調"));
+    descendants(ids["data-bar"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "0";
+    descendants(ids["data-bar"]).find((node) => node.textContent === "重新試算").listeners.click();
+    assert.ok(descendants(ids["data-bar"]).some((node) => node.textContent === "試算：維持"));
     assert.equal(card("每日執行淨收益"), undefined);
     assert.equal(input("daily_revenue").value, "2651");
     input("daily_revenue").value = "100"; input("daily_revenue").listeners.change();
@@ -59,6 +72,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     location.hash = "#scenario"; events.hashchange();
     assert.equal(input("daily_revenue").value, "2651");
     assert.equal(links[1].attributes["aria-current"], "page");
+    await flush();
   } finally {
     for (const [key, descriptor] of Object.entries(saved)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

@@ -3,12 +3,39 @@ on:
   pull_request:
   push:
     branches: [main]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      statuses: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -p 'test_*.py'
       - run: node --test "tests/*.test.js"
+      - name: Download public data and generate initial snapshot
+        run: |
+          if [ ! -f data/daily_summary.json ]; then
+            python analysis/download.py --start 2026-03-01 --end 2026-08-30
+            node analysis/build.mjs
+          fi
+          node analysis/verify.mjs
+      - name: Publish verified initial snapshot to this PR only
+        if: github.event_name == 'pull_request' && github.head_ref == 'feat/t6-p13-standalone-data' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$(git ls-files --others --exclude-standard data/daily_summary.json)" ]; then
+            python analysis/publish_snapshot.py
+          fi
