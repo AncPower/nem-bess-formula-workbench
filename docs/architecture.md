@@ -109,6 +109,18 @@ const plan = compute_day({
 
 歷史模式沿用設定檔設備與建議公式，不採卡片臨時改寫。缺資料日排除，有效零收益日納入；P10 是數值第 10 百分位而非超越機率。分位數參考欄位獨立於 P13 的臨時試算，兩者不會互相修改。
 
+## 分享與比較（P7）
+
+`src/share_state.js` 是純函式模組：`share_snapshot()` 取出會影響結果的設定，`encode_share()`／`decode_share()` 以 base64url JSON 放進網址 `?s=`，`compare_rows()` 逐條比較兩組結果。分頁仍用 `#predispatch`／`#scenario`，兩者互不干擾。
+
+| 保存 | 不保存 |
+|---|---|
+| `value_overrides`、`expression_overrides`、被引用的 `custom_labels`、啟用中的 `scenario_history` 條件（起訖日、標準、分位數） | AEMO 電價、歷史摘要、算出的每日收益、未啟用的歷史欄位、P13 臨時試算 |
+
+解碼採白名單並整份拒絕：版本必須是 1、不允許未知欄位；公式 id 必須在登記檔，式子不超過 500 字；變數必須在變數目錄、自訂名稱或改寫式子中出現，且不能是 `aggregates` 宣告的彙總輸入；自訂名稱的代號必須等於由名稱產生的代號（與 `key_of` 共用 `custom_key()`）；日期為 `YYYY-MM-DD`、分位數只接受 P10／P50／P90。編碼後超過 6000 字元時拒絕產生。產生網址前先自我解碼一次，不給出打不開的網址。式子本身仍由既有解析器在計算時檢查，錯誤顯示在卡片上。
+
+比較區以 `evaluate_view(default_settings())` 計算預設版：同一份 `state.data` 與設定檔，沒有覆寫、改寫或歷史模式；目前版本即畫面上的結果。兩者只差在使用者設定，不代表不同時點的電價差異。
+
 ## CI 與發布邊界
 
 一般 PR 驗證已提交摘要及全部 Python／Node 測試，不自動重產已有摘要。若沒有摘要，現有工作流程使用固定範例期間下載並產製；僅在 `feat/t6-p13-standalone-data` 的同 repo PR 可由 `analysis/publish_snapshot.py` 發布首次摘要，透過原 HEAD 檢查與非強制更新保護並行修改，不推 `main`。
