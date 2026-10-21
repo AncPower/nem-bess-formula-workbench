@@ -4,9 +4,9 @@
 
 | 層 | 內容 | 變動頻率 |
 |---|---|---|
-| 骨幹 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查、`src/predispatch.js` 資料轉接、`src/data_trust.js` 資料可信度、`src/app.js` 介面 | 低 |
+| 骨幹 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查、`src/predispatch.js` 資料轉接、`src/cycles.js` 多循環選窗、`src/data_trust.js` 資料可信度、`src/app.js` 介面 | 低 |
 | 肌肉 | `formulas/registry.json` 公式、`formulas/variables.json` 變數 | 高 |
-| 設定 | `config/battery.json` 設備參數、`config/spread_standard.json` 價差標準 | 經 PR 檢討後才改 |
+| 設定 | `config/battery.json` 設備參數、`config/spread_standard.json` 價差標準、`config/dispatch.json` 預調度範圍內最多循環數 | 經 PR 檢討後才改 |
 
 新增一條公式只要在 `formulas/registry.json` 多加一筆；需要新輸入時在 `formulas/variables.json` 多加一筆。骨幹不用改。
 
@@ -44,7 +44,7 @@ const plan = compute_day({
 // plan.daily: compute() result for daily formulas
 ```
 
-每個循環是資料物件，沿用 `predispatch.charge_average_price` 與 `predispatch.discharge_average_price`。呼叫端負責提供同一日、時序與設備條件合法的循環；此函式不選窗、不檢查重疊，也不代表已完成 P12。MVP 的頁面固定只傳一個循環，卡片標明是目前單循環計畫，不宣稱涵蓋完整市場日。
+每個循環是資料物件，沿用 `predispatch.charge_average_price` 與 `predispatch.discharge_average_price`。呼叫端負責提供時序與設備條件合法的循環；此函式不選窗、不檢查重疊。預調度頁的選窗與不重疊由 `src/cycles.js` 負責（見 P12）；歷史產製仍只傳一個循環。
 
 登記檔頂層的 `aggregates` 宣告每日可用的唯讀彙總輸入：
 
@@ -60,6 +60,31 @@ const plan = compute_day({
 `formula` 與 `when` 必須引用 `cycle` 公式，且 `when` 必須是 `decision` 格式。逐循環計算後，僅加總判斷非零的來源值；每日公式 `daily_net_revenue = executed_cycle_net_revenue` 仍可由使用者改寫。彙總輸入本身不能用手動值覆蓋，要改結果應調整循環輸入、判斷或每日式子。
 
 同層公式可互相引用，跨層公式不可直接引用；每日只能透過宣告的彙總輸入取用循環輸出。格式檢查及使用者改寫後的執行階段都會阻擋跨層引用。循環來源或判斷有錯時，每日相關公式顯示錯誤，不以零代替；加總溢位亦顯示錯誤。空循環陣列表示合法的零循環計畫，彙總為零，不可用來表示資料缺漏；歷史產製另行排除不完整日期。
+
+## 預調度多循環（P12）
+
+`best_cycles(points, battery, max_cycles)`（`src/cycles.js`）在整段預調度範圍內選最多 `max_cycles` 個不重疊的循環，目前上限 `MAX_CYCLES = 2`。每個循環先充後放、連續滿功率，循環依序排列（充 → 放 → 充 → 放），從空電池開始，電量不會超出容量。
+
+| 項目 | 規則 |
+|---|---|
+| 目標 | 與 `best_single_cycle()` 相同：最大化各循環「來回效率 × 放電均價 − 充電均價」的加總；不含 MLF 與損耗成本，與單循環選窗一致 |
+| 上限 1 | 直接回傳 `best_single_cycle()` 的結果，完全相同（含同分取最早） |
+| 上限 2 | 以分割點掃描：分割點前最佳循環＋分割點後最佳循環，O(n²) 以內；加總要嚴格高於最佳單循環（容忍 1e-9）才排兩個，否則維持一個 |
+| 時段不足 | 預調度時段少於 4 段時只回一個循環；少於 2 段時回空陣列 |
+| 上限範圍 | 以整段預調度範圍計，不是市場日；循環可跨午夜，與單循環行為一致 |
+
+選窗後，頁面把每個循環以 `{ predispatch: cycle }` 交給 `compute_day()`：每個循環各自算價差、淨收益與執行判斷，彙總沿用 `aggregates`，只加總判斷為執行的循環。不將數量上限寫進公式或變數目錄，因為它是排程限制，不是公式輸入。
+
+| 介面 | 行為 |
+|---|---|
+| 上限來源 | `config/dispatch.json` 的 `max_cycles` 是預設值；資料列「預調度範圍內最多循環數」可暫時改為 1 或 2，不寫回設定檔；數值不合法時頁面無法載入並列出原因 |
+| 結論列 | 大字是循環 1（下一個循環）的判斷；兩個循環時理由列逐循環列出判斷、價差與淨收益，再列「預調度範圍執行淨收益」 |
+| 公式卡片 | 每循環公式逐循環列出結果（「循環 1 … · 循環 2 …」）；彙總卡片標「彙總：預調度範圍內已執行的循環」 |
+| 手動均價 | 改了充電或放電均價時只試算循環 1，理由列標明另有幾個循環未計入；同一組手動均價不套到每個循環 |
+| 排程圖 | 畫出實際試算的每個循環；圖下摘要與游標說明標「循環 1」「循環 2」與各自判斷 |
+| 分享與比較 | 使用者改過且不同於預設的上限寫進分享網址的 `max_cycles`；比較區列「預調度範圍內最多循環數：預設 → 你的」，每循環公式列循環 1 的值 |
+
+限制：登記檔的公式名稱「每日執行淨收益」與說明「MVP 僅接一個循環」在歷史摘要指紋範圍內，本次未改，要等重產摘要時一併修正。歷史摘要（T6）、P13、P8 仍是單循環，不代表兩個循環的歷史收益。
 
 ## 獨立歷史資料流程（T6）
 
@@ -115,11 +140,11 @@ const plan = compute_day({
 
 | 保存 | 不保存 |
 |---|---|
-| `value_overrides`、`expression_overrides`、被引用的 `custom_labels`、啟用中的 `scenario_history` 條件（起訖日、標準、分位數） | AEMO 電價、歷史摘要、算出的每日收益、未啟用的歷史欄位、P13 臨時試算 |
+| `value_overrides`、`expression_overrides`、被引用的 `custom_labels`、啟用中的 `scenario_history` 條件（起訖日、標準、分位數）、使用者改過的 `max_cycles`（P12） | AEMO 電價、歷史摘要、算出的每日收益、未啟用的歷史欄位、P13 臨時試算 |
 
-解碼採白名單並整份拒絕：版本必須是 1、不允許未知欄位；公式 id 必須在登記檔，式子不超過 500 字；變數必須在變數目錄、自訂名稱或改寫式子中出現，且不能是 `aggregates` 宣告的彙總輸入；自訂名稱的代號必須等於由名稱產生的代號（與 `key_of` 共用 `custom_key()`）；日期為 `YYYY-MM-DD`、分位數只接受 P10／P50／P90。編碼後超過 6000 字元時拒絕產生。產生網址前先自我解碼一次，不給出打不開的網址。式子本身仍由既有解析器在計算時檢查，錯誤顯示在卡片上。
+解碼採白名單並整份拒絕：版本必須是 1、不允許未知欄位；公式 id 必須在登記檔，式子不超過 500 字；變數必須在變數目錄、自訂名稱或改寫式子中出現，且不能是 `aggregates` 宣告的彙總輸入；自訂名稱的代號必須等於由名稱產生的代號（與 `key_of` 共用 `custom_key()`）；日期為 `YYYY-MM-DD`、分位數只接受 P10／P50／P90；`max_cycles` 只接受 1 到 `MAX_CYCLES` 的整數。編碼後超過 6000 字元時拒絕產生。產生網址前先自我解碼一次，不給出打不開的網址。式子本身仍由既有解析器在計算時檢查，錯誤顯示在卡片上。
 
-比較區以 `evaluate_view(default_settings())` 計算預設版：同一份 `state.data` 與設定檔，沒有覆寫、改寫或歷史模式；目前版本即畫面上的結果。兩者只差在使用者設定，不代表不同時點的電價差異。
+比較區以 `evaluate_view(default_settings())` 計算預設版：同一份 `state.forecast` 與設定檔，沒有覆寫、改寫、歷史模式或循環上限調整；目前版本即畫面上的結果。兩者只差在使用者設定，不代表不同時點的電價差異。
 
 ## 資料可信度（T8）
 
@@ -164,4 +189,5 @@ const plan = compute_day({
 | 結果不是有限數值 | 顯示「可能除以 0」 |
 | AEMO API 失敗 | 清掉上一次的電價與曲線，結論列顯示「讀取失敗」，不給執行／等待；提示可以手動輸入均價試算 |
 | 預調度資料超過 35 分鐘 | 結論列顯示「資料可能過期」，判斷只當試算結果；頁面開著每分鐘重新判斷 |
+| `config/dispatch.json` 的 `max_cycles` 不合法 | 頁面無法載入，列出原因；分享網址帶不合法上限時整份不套用 |
 | 登記檔格式錯誤 | CI 失敗；頁面列出問題，不顯示任何結果 |
