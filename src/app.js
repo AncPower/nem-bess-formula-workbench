@@ -1,9 +1,10 @@
 /**
  * 頁面：一個網址、兩個分頁（#predispatch、#scenario）。兩個分頁共用同一份公式登記檔、變數目錄與計算引擎。
  *
- * 版面是「潮汐表」（docs/design.md）：先講結論（執行／等待），下方時段色帶與電價曲線，再往下是輸入與可收合的公式。
- * 輸入時即時預覽（input 事件，短暫延遲後重算並顯示「計算中」）；離開欄位或按 Enter（change 事件）才重建整頁，
- * 讓式子裡新出現的名稱長出輸入欄。
+ * 版面（docs/design.md）：分頁標題說明用途 → 結論列 → 電價與充放電排程圖（昨天、今天、明天三天等距時間軸，左右兩個 y 軸）→ 公式區。
+ * 公式區同時是輸入區：式子裡每個變數都是一個中文名稱框框（依類別上色），框裡直接改數值；說明、單位與來源在滑鼠移上或聚焦時才顯示。
+ * 改寫公式也用中文名稱，不出現英文代號；打一個新的中文名稱就會多一個輸入框。
+ * 輸入時即時預覽（input 事件，短暫延遲後重算）；離開欄位或按 Enter（change 事件）才重建整頁。
  */
 
 import { compute } from "./engine.js";
@@ -11,19 +12,29 @@ import { compute_day } from "./day.js";
 import { mount_history } from "./history_panel.js";
 import { check_registry } from "./registry_check.js";
 import { best_single_cycle, fetch_report, parse_report } from "./predispatch.js";
-import { SUPPORTED_FUNCTIONS } from "./expression.js";
-import { build_chart_model, leg_range, parse_price_series, time_label } from "./price_series.js";
-import { render_price_chart } from "./price_chart.js";
-import { render_tide_strip } from "./tide_strip.js";
-import { GROUPS, SHORT_LABELS, TERMS, describe_expression, group_of, short_label } from "./formula_help.js";
+import { build_chart_model, leg_range, parse_price_series, three_day_window } from "./price_series.js";
+import { render_dispatch_chart } from "./price_chart.js";
+import { GROUPS, SHORT_LABELS, TERMS, group_of, short_label } from "./formula_help.js";
+import { FUNCTION_TEXT, from_chinese, to_chinese, to_parts } from "./formula_text.js";
 
 const TABS = ["predispatch", "scenario"];
-const ORIGIN_LABELS = { user: "你調整的值", data: "預調度資料", config: "設定檔", default: "預設值", aggregate: "自動加總（唯讀）" };
+const PAGE_COPY = {
+  predispatch: {
+    title: "預調度：下一個循環要執行還是等待",
+    lede: "讀取 AEMO NSW1 的 30 分鐘預調度電價，選出均價最低的一段充電與其後均價最高的一段放電（每段長度＝容量 ÷ 功率），扣掉來回效率、損耗成本與邊際損失係數；價差達到標準且淨收益為正才執行。",
+  },
+  scenario: {
+    title: "情境評估：目標期間能賺多少、價差標準要不要調",
+    lede: "目標期間收益＝天數 × 可用率 × 每日淨收益（選定分位數）× 因素調整倍數；下方用已下載的 AEMO 歷史電價，試算不同價差標準下的收益保留率。",
+  },
+};
+const ORIGIN_LABELS = { user: "你調整的值", data: "來自預調度電價", config: "來自設定檔", default: "預設值", aggregate: "自動加總，不能直接改" };
 const GUIDANCE_LABELS = { principle: "原則", method: "方法", how_to_choose: "建議怎麼選" };
+const CATEGORY_LABELS = Object.fromEntries([...GROUPS.map((group) => [group.id, group.label]), ["result", "計算結果"]]);
 const PREVIEW_DELAY_MS = 200;
 
-const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, data_status: null };
-const view = { results: new Map(), plain: new Map(), aggregates: new Map(), timer: null, decision: null };
+const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, custom_labels: {}, data_status: null };
+const view = { results: new Map(), result_chips: new Map(), inputs: new Map(), aggregates: new Map(), editing: new Set(), timer: null, decision: null, width: null };
 
 const element = (tag, attributes = {}, text) => {
   const node = document.createElement(tag);
@@ -43,6 +54,7 @@ function format_value(value, format, unit) {
   const text = value.toLocaleString("zh-TW", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
   return format === "currency" ? `A$ ${text}` : `${text}${unit ? ` ${unit}` : ""}`;
 }
+const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
 
 function evaluate_view() {
   const tab = current_tab();
@@ -59,16 +71,39 @@ function evaluate_view() {
   const results = [...new Map([...base.results, ...plan.cycles[0].results, ...plan.daily.results].map((result) => [result.id, result])).values()];
   const visible = state.registry.formulas.filter((formula) => formula.page === tab || formula.page === "shared");
   const visible_results = visible.map((formula) => results.find((result) => result.id === formula.id));
-  const used = new Set(visible_results.flatMap((result) => result.uses));
-  return { tab, variables, results, visible, visible_results, used };
+  return { tab, variables, results, visible, visible_results };
 }
 
+/** 代號 → 中文名稱（畫面上唯一出現的名稱）。 */
 function label_of(name) {
+  if (Object.hasOwn(state.custom_labels, name)) return state.custom_labels[name];
   if (Object.hasOwn(SHORT_LABELS, name)) return SHORT_LABELS[name];
   const formula = state.registry.formulas.find((entry) => entry.id === name);
   if (formula) return formula.name;
   const variable = state.catalog.variables.find((entry) => entry.key === name);
   return variable ? short_label(variable.label) : name;
+}
+
+/** 中文名稱 → 代號；不認得的中文名稱變成新的自訂變數（代號由名稱決定，同名永遠對到同一個代號）。 */
+function key_of(word) {
+  const known = [
+    ...Object.entries(state.custom_labels).map(([key, label]) => [label, key]),
+    ...Object.entries(SHORT_LABELS).map(([key, label]) => [label, key]),
+    ...state.registry.formulas.map((formula) => [formula.name, formula.id]),
+    ...state.catalog.variables.map((variable) => [short_label(variable.label), variable.key]),
+  ];
+  const hit = known.find(([label]) => label === word);
+  if (hit) return hit[1];
+  if (/^[a-z_][a-z0-9_]*$/.test(word)) return word;
+  const key = `u_${[...word].map((char) => char.codePointAt(0).toString(36)).join("_")}`;
+  state.custom_labels[key] = word;
+  return key;
+}
+
+function category_of(name, variables) {
+  if (state.registry.formulas.some((formula) => formula.id === name)) return "result";
+  const variable = variables.find((entry) => entry.key === name);
+  return variable ? group_of(variable) : "custom";
 }
 
 function render() {
@@ -78,26 +113,28 @@ function render() {
     if (link.dataset.tab === result.tab) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   });
+  render_page_head(result.tab);
   render_verdict(result);
   render_data_bar(result.tab);
   render_chart(result);
-  render_variables(result.variables.filter((variable) => result.used.has(variable.key)));
-  render_formulas(result.visible, result.visible_results, result.variables);
+  render_formulas(result);
   set_status("done");
 }
 
-/** 即時預覽：只更新結果、中文算式與曲線，不重建輸入欄，避免打字時游標跳走。 */
+/** 即時預覽：只更新結果、計算結果框框與圖，不重建輸入框，避免打字時游標跳走。 */
 function refresh() {
   const result = evaluate_view();
   result.visible.forEach((formula, index) => {
     const node = view.results.get(formula.id);
     if (node) paint_result(node, formula, result.visible_results[index]);
-    const plain = view.plain.get(formula.id);
-    if (plain) plain.textContent = plain_text(result.visible_results[index].expression);
   });
-  for (const [key, input] of view.aggregates) {
+  for (const [id, nodes] of view.result_chips) {
+    const entry = result.results.find((item) => item.id === id);
+    for (const node of nodes) node.textContent = result_chip_text(id, entry);
+  }
+  for (const [key, inputs] of view.aggregates) {
     const variable = result.variables.find((entry) => entry.key === key);
-    if (variable) input.value = String(variable.value);
+    if (variable) for (const input of inputs) input.value = String(variable.value);
   }
   render_verdict(result);
   render_chart(result);
@@ -117,10 +154,17 @@ function set_status(kind) {
   node.textContent = kind === "busy" ? "計算中…" : `已更新 ${new Date().toLocaleTimeString("zh-TW", { hour12: false })}`;
 }
 
-const find_result = (results, id) => results.find((entry) => entry.id === id);
-const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+function render_page_head(tab) {
+  const title = document.getElementById("page-title");
+  const lede = document.getElementById("page-lede");
+  if (title) title.textContent = PAGE_COPY[tab].title;
+  if (lede) lede.textContent = PAGE_COPY[tab].lede;
+}
 
-/** 結論列：首屏第一行先講答案（預調度：執行或等待；情境評估：目標期間收益），理由放在同一行的小字。 */
+const find_result = (results, id) => results.find((entry) => entry.id === id);
+const find_variable = (variables, key) => variables.find((entry) => entry.key === key);
+
+/** 結論列：預調度顯示執行或等待；情境評估顯示目標期間收益。理由寫具體數字。 */
 function render_verdict({ tab, results, variables }) {
   const node = document.getElementById("verdict");
   if (!node) return;
@@ -131,7 +175,7 @@ function render_verdict({ tab, results, variables }) {
     const spread = find_result(results, "spread");
     const cycle = find_result(results, "cycle_net_revenue");
     const daily = find_result(results, "daily_net_revenue");
-    const standard = variables.find((entry) => entry.key === "spread_standard");
+    const standard = find_variable(variables, "spread_standard");
     if (!decision || decision.error) {
       word.textContent = "無法判斷";
       word.setAttribute("class", "verdict-word error");
@@ -144,13 +188,21 @@ function render_verdict({ tab, results, variables }) {
       if (spread && !spread.error && standard) parts.push(`價差 ${plain_number(spread.value)} ${spread.value >= standard.value ? "≥" : "<"} 標準 ${plain_number(standard.value)} AUD/MWh`);
       if (cycle && !cycle.error) parts.push(`每循環淨收益 ${format_value(cycle.value, "currency")}`);
       if (daily && !daily.error) parts.push(`當日執行淨收益 ${format_value(daily.value, "currency")}`);
-      why.textContent = `${parts.join(" · ")}。結果是建議，不是預測。`;
+      why.textContent = parts.join(" · ");
     }
   } else {
     const period = find_result(results, "period_revenue");
-    word.textContent = period && !period.error ? format_value(period.value, "currency") : "無法估算";
-    word.setAttribute("class", `verdict-word${period && !period.error ? "" : " error"}`);
-    why.textContent = period?.error ?? "目標期間收益：情境估算，不是預測。";
+    const ok = period && !period.error;
+    word.textContent = ok ? format_value(period.value, "currency") : "無法估算";
+    word.setAttribute("class", `verdict-word${ok ? "" : " error"}`);
+    if (!ok) why.textContent = period?.error ?? "找不到「目標期間收益」公式";
+    else {
+      const factor = find_result(results, "factor_multiplier");
+      const values = [["days", (v) => `${plain_number(v)} 天`], ["availability", (v) => `可用率 ${plain_number(v)}`], ["daily_revenue", (v) => `每日 ${format_value(v, "currency")}`]]
+        .map(([key, text]) => find_variable(variables, key) && text(find_variable(variables, key).value)).filter(Boolean);
+      if (factor && !factor.error) values.push(`調整倍數 ${plain_number(factor.value)}`);
+      why.textContent = `目標期間收益 · ${values.join(" × ")}`;
+    }
   }
   node.replaceChildren(word, why);
 }
@@ -158,96 +210,46 @@ function render_verdict({ tab, results, variables }) {
 function render_data_bar(tab) {
   const bar = document.getElementById("data-bar");
   const history = document.getElementById("history-panel");
+  const section = document.getElementById("chart-section");
   bar.replaceChildren();
   history.replaceChildren();
   if (tab !== "predispatch") {
-    bar.append(element("span", { class: "note" }, "情境評估：每日淨收益先手動輸入；公式下方可用歷史資料檢討價差標準。"));
+    section?.setAttribute("hidden", "");
     history.removeAttribute("hidden");
     mount_history(history, state);
     return;
   }
+  section?.removeAttribute("hidden");
   history.setAttribute("hidden", "");
   const status = state.data_status;
+  if (status?.loading) bar.append(element("span", { class: "loading" }, "正在讀取 AEMO 實際與預調度電價…"));
+  else if (status?.error) bar.append(element("span", { class: "error" }, `讀取失敗：${status.error}。可以直接在下方公式的「充電段均價」「放電段均價」框裡輸入。`));
+  else if (status?.cycle) {
+    const { cycle, fetched_at, actual_periods } = status;
+    bar.append(element("span", {}, `NSW1 · ${fetched_at.toLocaleTimeString("zh-TW", { hour12: false })} 取得 · 實際 ${actual_periods} 個＋預調度 ${cycle.forecast_periods} 個 30 分鐘時段 · 每段 ${cycle.periods_per_leg} 個時段 · 時間為 AEMO 時段結束時間`));
+  } else bar.append(element("span", {}, "尚未讀取，目前用預設均價。"));
   const button = element("button", { type: "button", class: "primary" }, status?.loading ? "讀取中…" : "重新讀取 AEMO 電價");
   if (status?.loading) button.setAttribute("disabled", "");
   button.addEventListener("click", load_predispatch);
   bar.append(button);
-  if (status?.loading) bar.append(element("span", { class: "loading" }, "正在讀取 AEMO 實際與預調度電價…"));
-  else if (status?.error) bar.append(element("span", { class: "error" }, `讀取失敗：${status.error}。可以直接在下方「電價」欄手動輸入均價。`));
-  else if (status?.cycle) {
-    const { cycle, fetched_at, charge, discharge, actual_periods } = status;
-    const leg = (name, range) => range ? `${name} ${time_label(range.first)} 到 ${time_label(range.last)}` : `${name}（時段未知）`;
-    bar.append(element("span", {}, `${fetched_at.toLocaleTimeString("zh-TW", { hour12: false })} 取得實際 ${actual_periods} 個、預調度 ${cycle.forecast_periods} 個 30 分鐘時段；${leg("充電", charge)}、${leg("放電", discharge)}（市場時間，AEMO 時段標記），每段 ${cycle.periods_per_leg} 個時段`));
-  } else bar.append(element("span", { class: "note" }, "尚未讀取，目前用預設均價。"));
 }
 
 function render_chart({ tab, results }) {
   const container = document.getElementById("price-chart");
-  if (!container) return;
-  if (tab !== "predispatch") {
-    container.setAttribute("hidden", "");
-    container.replaceChildren();
-    document.getElementById("tide-strip")?.replaceChildren();
-    return;
-  }
-  container.removeAttribute("hidden");
+  if (!container || tab !== "predispatch") { container?.replaceChildren(); return; }
   if (!state.series) {
-    container.replaceChildren(element("p", { class: "note" }, state.data_status?.loading ? "電價曲線讀取中…" : "讀到 AEMO 電價後，這裡會畫出實際電價、預調度電價與建議充放電時段。"));
+    container.replaceChildren(element("p", { class: "note" }, state.data_status?.loading ? "電價讀取中…" : "讀到 AEMO 電價後，這裡會畫出昨天到明天的實際與預調度電價，以及建議的充放電時段與功率。"));
     return;
   }
-  const decision = results.find((result) => result.id === "dispatch_decision");
+  const decision = find_result(results, "dispatch_decision");
   const label = decision && !decision.error ? format_value(decision.value, "decision") : null;
-  const model = build_chart_model(state.series, state.data.predispatch ?? null);
-  const strip = document.getElementById("tide-strip");
-  if (strip) {
-    const animate = view.decision !== null && label !== null && label !== view.decision;
-    render_tide_strip(strip, model, { decision: label, animate });
-  }
+  const animate = view.decision !== null && label !== null && label !== view.decision;
   view.decision = label;
-  render_price_chart(container, model, { decision: label });
+  view.width = container.clientWidth || null;
+  const timeline = three_day_window(state.series);
+  const model = build_chart_model(state.series, state.data.predispatch ?? null, timeline?.times ?? null);
+  render_dispatch_chart(container, model, { decision: label, power_mw: state.config.battery?.power_mw ?? 0, animate, days: timeline?.days ?? null });
   if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有實際電價時段，只畫出預調度電價。"));
-}
-
-function render_variables(variables) {
-  const list = document.getElementById("variable-list");
-  list.replaceChildren();
-  view.aggregates.clear();
-  for (const group of GROUPS) {
-    const members = variables.filter((variable) => group_of(variable) === group.id);
-    if (members.length === 0) continue;
-    const fieldset = element("fieldset", { class: "var-group", style: `flex: ${members.length} 1 ${Math.min(members.length, 4) * 9.25 + 1.5}rem` });
-    fieldset.append(element("legend", {}, group.label));
-    const fields = element("div", { class: "fields" });
-    for (const variable of members) fields.append(variable_field(variable));
-    fieldset.append(fields);
-    list.append(fieldset);
-  }
-}
-
-function variable_field(variable) {
-  const wrapper = element("div", { class: `variable${variable.origin === "user" ? " overridden" : ""}` });
-  const id = `var-${variable.key}`;
-  const label_text = `${short_label(variable.label)}${variable.unit && variable.unit !== "—" ? `（${variable.unit}）` : ""}`;
-  const help = [TERMS[variable.key]?.meaning, variable.hint].filter(Boolean).join("。");
-  const label = element("label", { for: id }, label_text);
-  if (variable.origin === "user") label.append(element("span", { class: "changed" }, " • 已改"));
-  wrapper.append(label);
-  const input = element("input", { id, type: "number", step: "any", value: String(variable.value) });
-  if (variable.origin === "aggregate") { input.setAttribute("disabled", ""); view.aggregates.set(variable.key, input); }
-  const apply = () => {
-    const value = Number(input.value);
-    if (input.value === "" || !Number.isFinite(value)) delete state.value_overrides[variable.key];
-    else state.value_overrides[variable.key] = value;
-  };
-  input.addEventListener("input", () => { apply(); schedule_preview(); });
-  input.addEventListener("change", () => { apply(); render(); });
-  wrapper.append(input);
-  const origin = variable.added_by_user ? "你在式子裡新增的變數" : ORIGIN_LABELS[variable.origin];
-  const origin_line = element("div", { class: "origin" }, `${origin} · `);
-  origin_line.append(element("code", {}, variable.key));
-  wrapper.append(origin_line);
-  if (help) wrapper.append(element("p", { class: "hint" }, help));
-  return wrapper;
 }
 
 function paint_result(node, formula, result) {
@@ -261,18 +263,85 @@ function paint_result(node, formula, result) {
   node.textContent = format_value(result.value, formula.format, formula.unit);
 }
 
-function plain_text(expression) {
-  return describe_expression(expression, label_of) ?? "式子有無法辨識的字元，請看上方錯誤訊息";
+function result_chip_text(id, entry) {
+  const formula = state.registry.formulas.find((item) => item.id === id);
+  if (!entry || entry.error) return "—";
+  return format_value(entry.value, formula?.format, formula?.unit);
 }
 
-function render_formulas(formulas, results, variables) {
+let tip_count = 0;
+/** 中文名稱框框：變數框裡直接改值；計算結果框只顯示值。說明、單位與來源在滑鼠移上或聚焦時顯示。 */
+function name_chip(name, formula_id, { variables, results }) {
+  const category = category_of(name, variables);
+  const tip_id = `tip-${++tip_count}`;
+  const tip = element("span", { class: "chip-tip", role: "tooltip", id: tip_id });
+  const label = label_of(name);
+  if (category === "result") {
+    const formula = state.registry.formulas.find((item) => item.id === name);
+    const chip = element("span", { class: "chip cat-result", tabindex: "0", "aria-describedby": tip_id });
+    const value = element("span", { class: "chip-value" }, result_chip_text(name, find_result(results, name)));
+    if (!view.result_chips.has(name)) view.result_chips.set(name, []);
+    view.result_chips.get(name).push(value);
+    chip.append(element("span", { class: "chip-name" }, label), value);
+    tip.textContent = [TERMS[name]?.meaning, formula?.unit && formula.unit !== "—" ? `單位：${formula.unit}` : null, "由上方的公式算出"].filter(Boolean).join("。");
+    chip.append(tip);
+    return chip;
+  }
+  const variable = find_variable(variables, name);
+  const id = `var-${formula_id}-${name}`;
+  const chip = element("span", { class: `chip cat-${category}${variable?.origin === "user" ? " overridden" : ""}` });
+  chip.append(element("label", { for: id, class: "chip-name" }, label));
+  const input = element("input", { id, type: "number", step: "any", inputmode: "decimal", value: String(variable?.value ?? 0), "data-key": name, "aria-describedby": tip_id });
+  const size = () => input.setAttribute("style", `--chars: ${Math.min(10, Math.max(3, String(input.value).length))}`);
+  size();
+  if (variable?.origin === "aggregate") {
+    input.setAttribute("disabled", "");
+    if (!view.aggregates.has(name)) view.aggregates.set(name, []);
+    view.aggregates.get(name).push(input);
+  }
+  if (!view.inputs.has(name)) view.inputs.set(name, []);
+  view.inputs.get(name).push(input);
+  const apply = () => {
+    const value = Number(input.value);
+    if (input.value === "" || !Number.isFinite(value)) delete state.value_overrides[name];
+    else state.value_overrides[name] = value;
+    for (const twin of view.inputs.get(name)) if (twin !== input) twin.value = input.value;
+    size();
+  };
+  input.addEventListener("input", () => { apply(); schedule_preview(); });
+  input.addEventListener("change", () => { apply(); render(); });
+  chip.append(input);
+  if (variable?.origin === "user") chip.append(element("span", { class: "changed", "aria-label": "已改" }, "•"));
+  const unit = variable?.unit && variable.unit !== "—" ? `單位：${variable.unit}` : null;
+  const origin = variable?.added_by_user ? "你在公式裡新增的變數" : ORIGIN_LABELS[variable?.origin];
+  tip.textContent = [TERMS[name]?.meaning, variable?.hint, unit, origin].filter(Boolean).join("。");
+  chip.append(tip);
+  return chip;
+}
+
+function expression_row(expression, formula_id, context) {
+  const row = element("p", { class: "expr" });
+  const parts = to_parts(expression);
+  if (!parts) { row.append(element("span", { class: "error" }, "式子有無法辨識的字元")); return row; }
+  for (const part of parts) {
+    if (part.type === "name") row.append(name_chip(part.name, formula_id, context));
+    else if (part.type === "call") row.append(element("span", { class: "fn" }, part.text));
+    else if (part.type === "op") row.append(element("span", { class: `op${part.text === "(" || part.text === ")" || part.text === "，" ? " paren" : ""}` }, part.text));
+    else row.append(element("span", { class: "num" }, part.text));
+  }
+  return row;
+}
+
+function render_formulas(context) {
+  const { visible, visible_results } = context;
   const list = document.getElementById("formula-list");
   list.replaceChildren();
   view.results.clear();
-  view.plain.clear();
-  const value_of = (name) => variables.find((entry) => entry.key === name)?.value ?? results.find((entry) => entry.id === name)?.value;
-  formulas.forEach((formula, index) => {
-    const result = results[index];
+  view.result_chips.clear();
+  view.inputs.clear();
+  view.aggregates.clear();
+  visible.forEach((formula, index) => {
+    const result = visible_results[index];
     const card = element("article", { class: "card" });
     const header = element("header");
     const title = element("div", { class: "card-title" });
@@ -285,42 +354,27 @@ function render_formulas(formulas, results, variables) {
     header.append(value);
     card.append(header);
 
-    const plain = element("p", { class: "plain-formula" }, plain_text(result.expression));
-    view.plain.set(formula.id, plain);
-    card.append(plain);
+    const equals = element("div", { class: "formula-line" });
+    equals.append(element("span", { class: "op eq" }, "＝"), expression_row(result.expression, formula.id, context));
+    card.append(equals);
 
-    const textarea = element("textarea", { rows: String(Math.max(2, Math.ceil(result.expression.length / 44))), "aria-label": `${formula.name}的式子`, spellcheck: "false" });
-    textarea.value = result.expression;
-    const apply = () => {
-      if (textarea.value.trim() === formula.expression) delete state.expression_overrides[formula.id];
-      else state.expression_overrides[formula.id] = textarea.value;
-    };
-    textarea.addEventListener("input", () => { apply(); schedule_preview(); });
-    textarea.addEventListener("change", () => { apply(); render(); });
-    card.append(textarea);
-
-    const chips = element("div", { class: "chips", "aria-label": "代號對照，點一下插入式子" });
-    for (const name of result.uses) {
-      const current = value_of(name);
-      const chip = element("button", { type: "button", class: "chip", title: TERMS[name]?.meaning ?? "你在式子裡新增的名稱" });
-      chip.append(element("span", {}, label_of(name)), element("code", {}, name));
-      if (typeof current === "number") chip.append(element("span", { class: "chip-value" }, `＝${current.toLocaleString("zh-TW", { maximumFractionDigits: 2 })}`));
-      chip.addEventListener("click", () => { insert_at_cursor(textarea, name); apply(); render(); });
-      chips.append(chip);
-    }
-    card.append(chips);
+    const actions = element("div", { class: "card-actions" });
+    const editing = view.editing.has(formula.id);
+    const toggle = element("button", { type: "button", "aria-expanded": String(editing) }, editing ? "完成改寫" : "改寫公式");
+    toggle.addEventListener("click", () => { if (editing) view.editing.delete(formula.id); else view.editing.add(formula.id); render(); });
+    actions.append(toggle);
     if (result.edited) {
-      const reset = element("button", { type: "button" }, "還原建議式子");
+      const reset = element("button", { type: "button" }, "還原建議公式");
       reset.addEventListener("click", () => { delete state.expression_overrides[formula.id]; render(); });
-      card.append(element("span", { class: "edited" }, "已改寫 "), reset);
+      actions.append(element("span", { class: "edited" }, "已改寫"), reset);
     }
+    card.append(actions);
+    if (editing) card.append(editor(formula, result, context));
 
     const details = element("details", { class: "guidance" });
     details.append(element("summary", {}, "原則、方法、怎麼選與來源"));
     const guidance = element("dl");
-    for (const [field, label] of Object.entries(GUIDANCE_LABELS)) {
-      guidance.append(element("dt", {}, label), element("dd", {}, formula.guidance[field]));
-    }
+    for (const [field, label] of Object.entries(GUIDANCE_LABELS)) guidance.append(element("dt", {}, label), element("dd", {}, formula.guidance[field]));
     guidance.append(element("dt", {}, "來源"));
     const sources = element("ul");
     for (const source of formula.guidance.sources) {
@@ -335,7 +389,31 @@ function render_formulas(formulas, results, variables) {
     card.append(details);
     list.append(card);
   });
-  list.append(element("p", { class: "note" }, `式子可用：+ − × ÷（* /）、^、比較（> >= < <= == !=）、${SUPPORTED_FUNCTIONS.join("、")}。輸入未定義的名稱，按 Enter 或離開欄位後會在輸入區新增一欄。`));
+}
+
+/** 改寫公式：用中文名稱寫式子，點下方框框插入名稱；打新的中文名稱就多一個輸入框。 */
+function editor(formula, result, { variables, visible }) {
+  const box = element("div", { class: "editor" });
+  const textarea = element("textarea", { rows: "2", "aria-label": `改寫「${formula.name}」`, spellcheck: "false" });
+  textarea.value = to_chinese(result.expression, label_of);
+  const apply = () => {
+    const expression = from_chinese(textarea.value, key_of);
+    if (expression.replace(/\s/g, "") === formula.expression.replace(/\s/g, "")) delete state.expression_overrides[formula.id];
+    else state.expression_overrides[formula.id] = expression;
+  };
+  textarea.addEventListener("input", () => { apply(); schedule_preview(); });
+  textarea.addEventListener("change", () => { apply(); render(); });
+  box.append(textarea);
+  const palette = element("div", { class: "palette", "aria-label": "點一下插入名稱" });
+  const names = [...visible.filter((item) => item.id !== formula.id).map((item) => item.id), ...variables.filter((variable) => variable.origin !== "aggregate" || formula.scope === "daily").map((variable) => variable.key)];
+  for (const name of new Set(names)) {
+    const chip = element("button", { type: "button", class: `chip chip-insert cat-${category_of(name, variables)}` }, label_of(name));
+    chip.addEventListener("click", () => { insert_at_cursor(textarea, label_of(name)); apply(); render(); });
+    palette.append(chip);
+  }
+  box.append(palette);
+  box.append(element("p", { class: "note" }, `運算：+ − × ÷ ^ ≥ ≤ ＝ ≠ ( )；函式：${Object.values(FUNCTION_TEXT).map((text) => `${text}(…)`).join("、")}，參數用「，」分隔。打一個新的中文名稱，按 Enter 或點別處後會多一個輸入框。`));
+  return box;
 }
 
 function insert_at_cursor(textarea, text) {
@@ -343,8 +421,8 @@ function insert_at_cursor(textarea, text) {
   const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
   const before = textarea.value.slice(0, start);
   const after = textarea.value.slice(end);
-  const pad_left = before && !/[\s(,]$/.test(before) ? " " : "";
-  const pad_right = after && !/^[\s),]/.test(after) ? " " : "";
+  const pad_left = before && !/[\s(（，,]$/.test(before) ? " " : "";
+  const pad_right = after && !/^[\s)），,]/.test(after) ? " " : "";
   textarea.value = `${before}${pad_left}${text}${pad_right}${after}`;
 }
 
@@ -390,9 +468,16 @@ async function start() {
   document.getElementById("reset-all").addEventListener("click", () => {
     state.value_overrides = {};
     state.expression_overrides = {};
+    view.editing.clear();
     render();
   });
   window.addEventListener("hashchange", render);
+  const chart = document.getElementById("price-chart");
+  if (chart && typeof ResizeObserver === "function") {
+    new ResizeObserver(() => {
+      if (chart.clientWidth && chart.clientWidth !== view.width && current_tab() === "predispatch") render_chart(evaluate_view());
+    }).observe(chart);
+  }
   render();
   if (current_tab() === "predispatch") load_predispatch();
 }
