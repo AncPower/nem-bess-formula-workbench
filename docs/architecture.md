@@ -4,7 +4,7 @@
 
 | 層 | 內容 | 變動頻率 |
 |---|---|---|
-| 骨幹 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查、`src/predispatch.js` 資料轉接、`src/app.js` 介面 | 低 |
+| 骨幹 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查、`src/predispatch.js` 資料轉接、`src/data_trust.js` 資料可信度、`src/app.js` 介面 | 低 |
 | 肌肉 | `formulas/registry.json` 公式、`formulas/variables.json` 變數 | 高 |
 | 設定 | `config/battery.json` 設備參數、`config/spread_standard.json` 價差標準 | 經 PR 檢討後才改 |
 
@@ -121,6 +121,12 @@ const plan = compute_day({
 
 比較區以 `evaluate_view(default_settings())` 計算預設版：同一份 `state.data` 與設定檔，沒有覆寫、改寫或歷史模式；目前版本即畫面上的結果。兩者只差在使用者設定，不代表不同時點的電價差異。
 
+## 資料可信度（T8）
+
+`src/data_trust.js` 的 `data_trust()` 是純函式，依取價狀態、電價序列、使用者覆寫與目前時間回傳 `manual`、`loading`、`error`、`none`、`live` 或 `stale`。優先順序：手動改 `charge_price`／`discharge_price` 最先（讀取失敗後的手動輸入也算手動試算），其次讀取中、讀取失敗、尚未讀取；有資料時，最後一個 `ACTUAL` 時段結束到現在不超過 `STALE_MINUTES`（35）分鐘才是 `live`。時間字串沒有時區時視為 NEM 時間 UTC+10；無法解析時視為 `stale`。
+
+只影響呈現，不改計算：公式卡片照常計算，「執行或等待」公式也沒有加入時效條件，避免改寫公式就繞過、或手動試算永遠等待。只有 `live` 時結論列顯示執行／等待，其餘狀態顯示狀態名稱，判斷只寫成「試算結果」，排程圖標籤加上「試算：」。
+
 ## CI 與發布邊界
 
 一般 PR 驗證已提交摘要及全部 Python／Node 測試，不自動重產已有摘要。若沒有摘要，現有工作流程使用固定範例期間下載並產製；僅在 `feat/t6-p13-standalone-data` 的同 repo PR 可由 `analysis/publish_snapshot.py` 發布首次摘要，透過原 HEAD 檢查與非強制更新保護並行修改，不推 `main`。
@@ -156,5 +162,6 @@ const plan = compute_day({
 | 式子無法解析 | 該卡片顯示錯誤；引用它的公式顯示「引用的公式無法計算」；其他公式照常 |
 | 公式互相引用 | 顯示循環引用錯誤 |
 | 結果不是有限數值 | 顯示「可能除以 0」 |
-| AEMO API 失敗 | 保留預設或上次的值，提示可以手動輸入 |
+| AEMO API 失敗 | 清掉上一次的電價與曲線，結論列顯示「讀取失敗」，不給執行／等待；提示可以手動輸入均價試算 |
+| 預調度資料超過 35 分鐘 | 結論列顯示「資料可能過期」，判斷只當試算結果；頁面開著每分鐘重新判斷 |
 | 登記檔格式錯誤 | CI 失敗；頁面列出問題，不顯示任何結果 |

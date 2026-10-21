@@ -51,6 +51,7 @@ main > .verdict-bar { border-top: none; margin-top: 0; padding-top: var(--space-
 .verdict-word.decision-go { color: var(--text-primary); }
 .verdict-word.decision-wait { color: var(--text-muted); }
 .verdict-word.error { color: var(--tide-high); font-size: var(--size-xl); }
+.verdict-word.pending, .verdict-word.trial { color: var(--text-muted); font-size: var(--size-xl); }
 .verdict-why { margin: 0; font-size: var(--size-md); color: var(--text-primary); }
 .calc-status { font-size: var(--size-sm); color: var(--text-muted); white-space: nowrap; min-height: 1.6em; }
 .calc-status.busy { color: var(--text-primary); font-weight: var(--weight-strong); }
