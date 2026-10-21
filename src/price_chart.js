@@ -6,6 +6,7 @@
  */
 
 import { time_label } from "./price_series.js";
+import { money } from "./format.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const HEIGHT = 280;
@@ -27,7 +28,6 @@ const html = (tag, attributes = {}, text) => {
   return node;
 };
 
-const money = (value) => `A$ ${Math.round(value).toLocaleString("zh-TW")}`;
 const ms_of = (settlement_date) => Date.parse(`${settlement_date}Z`);
 const stamp = (ms) => new Date(ms).toISOString().slice(5, 16).replace("-", "/").replace("T", " ");
 const clock = (ms) => new Date(ms).toISOString().slice(11, 16);
@@ -219,7 +219,8 @@ export function render_dispatch_chart(container, model, { decision = null, power
     const css_x = at_x * ratio;
     const title = html("strong", {}, content.title);
     tip.replaceChildren(title, ...content.lines.map((line) => html("span", {}, line)));
-    tip.setAttribute("style", css_x > css_width / 2 ? `right: ${Math.round(css_width - css_x + 8)}px` : `left: ${Math.round(css_x + 8)}px`);
+    const side = css_x > css_width / 2 ? `right: ${Math.round(css_width - css_x + 8)}px` : `left: ${Math.round(css_x + 8)}px`;
+    tip.setAttribute("style", `top: ${Math.round(PAD.top * ratio + 8)}px; ${side}`);
     tip.removeAttribute("hidden");
   };
   const hide = () => {
