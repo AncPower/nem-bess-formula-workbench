@@ -151,6 +151,22 @@ main > .verdict-bar { border-top: none; margin-top: 0; padding-top: var(--space-
 .history th, .history td { border-bottom: 1px solid var(--rule); padding: var(--space-1) var(--space-2); text-align: right; }
 .history th { position: sticky; top: 0; background: var(--surface-page); }
 
+/* 與預設值比較與分享（P7） */
+.compare .section-head .note { flex: 1; }
+.share-output:empty { display: none; }
+.share-output { margin-bottom: var(--space-3); }
+.share-url { width: 100%; padding: var(--space-1) var(--space-2); border: 1px solid var(--text-muted); border-radius: var(--radius-control); font: var(--size-sm) / 1.5 var(--font-mono); color: var(--text-primary); background: var(--surface-raised); }
+.share-output .note { margin-top: var(--space-1); }
+.compare-same { margin: 0; font-size: var(--size-sm); color: var(--text-muted); }
+.compare-changes { margin: 0 0 var(--space-3); padding-left: 1.25rem; font-size: var(--size-sm); }
+.compare-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: var(--size-sm); }
+.compare-table th, .compare-table td { border-bottom: 1px solid var(--rule); padding: var(--space-1) var(--space-2); text-align: right; }
+.compare-table th:first-child { text-align: left; font-weight: var(--weight-regular); }
+.compare-table tr:first-child th { font-weight: var(--weight-strong); color: var(--text-muted); }
+.compare-table .changed-row th, .compare-table .changed-row td { font-weight: var(--weight-strong); color: var(--text-primary); }
+.compare-table td:last-child { color: var(--text-muted); }
+.compare-table .changed-row td:last-child { color: var(--tide-high); }
+
 /* 按鈕與焦點 */
 button { font: inherit; font-size: var(--size-sm); padding: var(--space-1) var(--space-3); border: 1px solid var(--text-muted); border-radius: var(--radius-control); background: var(--surface-raised); color: var(--text-primary); cursor: pointer; }
 button:hover { border-color: var(--text-primary); }
