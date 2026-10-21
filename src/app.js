@@ -1,7 +1,7 @@
 /**
  * 頁面：一個網址、兩個分頁（#predispatch、#scenario）。兩個分頁共用同一份公式登記檔、變數目錄與計算引擎。
  *
- * 版面（docs/design.md）：分頁標題說明用途 → 結論列 → 電價與充放電排程圖（共用時間軸、左右兩個 y 軸）→ 公式區。
+ * 版面（docs/design.md）：分頁標題說明用途 → 結論列 → 電價與充放電排程圖（昨天、今天、明天三天等距時間軸，左右兩個 y 軸）→ 公式區。
  * 公式區同時是輸入區：式子裡每個變數都是一個中文名稱框框（依類別上色），框裡直接改數值；說明、單位與來源在滑鼠移上或聚焦時才顯示。
  * 改寫公式也用中文名稱，不出現英文代號；打一個新的中文名稱就會多一個輸入框。
  * 輸入時即時預覽（input 事件，短暫延遲後重算）；離開欄位或按 Enter（change 事件）才重建整頁。
@@ -12,7 +12,7 @@ import { compute_day } from "./day.js";
 import { mount_history } from "./history_panel.js";
 import { check_registry } from "./registry_check.js";
 import { best_single_cycle, fetch_report, parse_report } from "./predispatch.js";
-import { build_chart_model, leg_range, parse_price_series } from "./price_series.js";
+import { build_chart_model, leg_range, parse_price_series, three_day_window } from "./price_series.js";
 import { render_dispatch_chart } from "./price_chart.js";
 import { GROUPS, SHORT_LABELS, TERMS, group_of, short_label } from "./formula_help.js";
 import { FUNCTION_TEXT, from_chinese, to_chinese, to_parts } from "./formula_text.js";
@@ -238,7 +238,7 @@ function render_chart({ tab, results }) {
   const container = document.getElementById("price-chart");
   if (!container || tab !== "predispatch") { container?.replaceChildren(); return; }
   if (!state.series) {
-    container.replaceChildren(element("p", { class: "note" }, state.data_status?.loading ? "電價讀取中…" : "讀到 AEMO 電價後，這裡會畫出實際與預調度電價，以及建議的充放電時段與功率。"));
+    container.replaceChildren(element("p", { class: "note" }, state.data_status?.loading ? "電價讀取中…" : "讀到 AEMO 電價後，這裡會畫出昨天到明天的實際與預調度電價，以及建議的充放電時段與功率。"));
     return;
   }
   const decision = find_result(results, "dispatch_decision");
@@ -246,7 +246,9 @@ function render_chart({ tab, results }) {
   const animate = view.decision !== null && label !== null && label !== view.decision;
   view.decision = label;
   view.width = container.clientWidth || null;
-  render_dispatch_chart(container, build_chart_model(state.series, state.data.predispatch ?? null), { decision: label, power_mw: state.config.battery?.power_mw ?? 0, animate });
+  const timeline = three_day_window(state.series);
+  const model = build_chart_model(state.series, state.data.predispatch ?? null, timeline?.times ?? null);
+  render_dispatch_chart(container, model, { decision: label, power_mw: state.config.battery?.power_mw ?? 0, animate, days: timeline?.days ?? null });
   if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有實際電價時段，只畫出預調度電價。"));
 }
 
