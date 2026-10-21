@@ -4,11 +4,14 @@
 
 | 層 | 內容 | 變動頻率 |
 |---|---|---|
-| 骨幹 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查、`src/predispatch.js` 資料轉接、`src/cycles.js` 多循環選窗、`src/data_trust.js` 資料可信度、`src/app.js` 介面 | 低 |
-| 肌肉 | `formulas/registry.json` 公式、`formulas/variables.json` 變數 | 高 |
+| 骨幹：計算核心 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查 | 低 |
+| 骨幹：選窗與資料轉接 | `src/predispatch.js` 資料轉接與單循環選窗、`src/cycles.js` 多循環選窗、`src/aemo_fetch.js` 取價、`src/price_series.js` 電價序列 | 每版 |
+| 純函式功能 | `src/data_trust.js` 資料可信度、`src/share_state.js` 分享與比較、`src/history_review.js` 歷史檢討、`src/history_quantiles.js` 分位數 | 每功能 |
+| 介面 | `src/app.js`（熱點）、`src/price_chart.js`、`src/history_panel.js`、`src/formula_help.js`、`src/formula_text.js`、`src/format.js` | 高 |
+| 肌肉 | `formulas/registry.json` 公式、`formulas/variables.json` 變數 | 依需求；在歷史摘要指紋範圍內，改了要重產摘要 |
 | 設定 | `config/battery.json` 設備參數、`config/spread_standard.json` 價差標準、`config/dispatch.json` 預調度範圍內最多循環數 | 經 PR 檢討後才改 |
 
-新增一條公式只要在 `formulas/registry.json` 多加一筆；需要新輸入時在 `formulas/variables.json` 多加一筆。骨幹不用改。
+新增一條公式只要在 `formulas/registry.json` 多加一筆；需要新輸入時在 `formulas/variables.json` 多加一筆。骨幹不用改，但兩個檔案都在歷史摘要指紋範圍內，改動後必須重產摘要（見 T6 與 [design-questions.md](design-questions.md) D2）。逐檔用途、用法與改動位置見 [repo-map.md](repo-map.md)。
 
 ## 變數值的優先順序
 
@@ -84,7 +87,7 @@ const plan = compute_day({
 | 排程圖 | 畫出實際試算的每個循環；圖下摘要與游標說明標「循環 1」「循環 2」與各自判斷 |
 | 分享與比較 | 使用者改過且不同於預設的上限寫進分享網址的 `max_cycles`；比較區列「預調度範圍內最多循環數：預設 → 你的」，每循環公式列循環 1 的值 |
 
-限制：登記檔的公式名稱「每日執行淨收益」與說明「MVP 僅接一個循環」在歷史摘要指紋範圍內，本次未改，要等重產摘要時一併修正。歷史摘要（T6）、P13、P8 仍是單循環，不代表兩個循環的歷史收益。
+限制：登記檔的公式名稱「每日執行淨收益」與說明「MVP 僅接一個循環」在歷史摘要指紋範圍內，本次未改，要等重產摘要時一併修正（問題紀錄見 [design-questions.md](design-questions.md) D2）。歷史摘要（T6）、P13、P8 仍是單循環，不代表兩個循環的歷史收益。
 
 ## 獨立歷史資料流程（T6）
 
@@ -96,7 +99,7 @@ const plan = compute_day({
 | `src/history_review.js` | 純計算的歷史收益保留率與成本參考 |
 | `src/history_panel.js` | 載入摘要、比對前端公式／設備雜湊、呈現歷史檢討與試算欄位 |
 
-資料流為 AEMO ZIP → `.cache/history.json` → `data/daily_summary.json` → 情境分頁。原始 ZIP 與正規化資料留在被忽略的 `.cache/`；只發布精簡摘要。下載與每月更新命令見 [README](../README.md#獨立下載與每月更新)，不需私有 Token 或其他 repo。
+資料流為 AEMO ZIP → `.cache/history.json` → `data/daily_summary.json` → 情境分頁。原始 ZIP 與正規化資料留在被忽略的 `.cache/`；只發布精簡摘要。下載與每月更新命令見 [repo-map.md](repo-map.md#每月更新與重產歷史資料)，不需私有 Token 或其他 repo。
 
 ### 來源、時間與失敗邊界
 
@@ -154,11 +157,11 @@ const plan = compute_day({
 
 ## CI 與發布邊界
 
-一般 PR 驗證已提交摘要及全部 Python／Node 測試，不自動重產已有摘要。若沒有摘要，現有工作流程使用固定範例期間下載並產製；僅在 `feat/t6-p13-standalone-data` 的同 repo PR 可由 `analysis/publish_snapshot.py` 發布首次摘要，透過原 HEAD 檢查與非強制更新保護並行修改，不推 `main`。
+每個 PR 與 `main` 執行全部 Python／Node 測試，並以 `analysis/verify.mjs` 驗證已提交摘要，不自動重產已有摘要；只有 `data/daily_summary.json` 不存在時，才以固定範例期間下載並產製後驗證。CI 只有唯讀權限，不推送任何提交、不回填狀態；T6 首次發布摘要用的一次性腳本已在摘要發布後移除。
 
-該首次發布腳本使用 GitHub Token，並回填新摘要提交的 `test` 狀態；這是指向來源流程的證據，不等於新提交已重新執行完整 CI。合併必須以最新內容的實際完整 check 為準。這不是每月自動更新機制，也不會自動修改標準或合併。
+每月更新由人在本機執行並以 PR 提交，步驟見 [repo-map.md](repo-map.md#每月更新與重產歷史資料)。合併必須以最新內容的實際完整 check 為準；CI 不會自動修改標準或合併。
 
-文件分工固定：設計在本文件，操作在 README，需求狀態與各版本驗收標準只在 [requirements.md](requirements.md)（「版本驗收標準」一版一個小節），驗收證據在對應 issue、PR 描述與 CI，尚未決定的設計問題與延伸設計只記問題、不記解法、不開 issue，集中在 [design-questions.md](design-questions.md)，統一整理後再把結論併入本文對應章節。本文不保存單次驗收日誌或重複需求狀態。
+文件分工固定：設計在本文件，使用者操作在 README，各檔案用途、改動位置與每月更新命令在 [repo-map.md](repo-map.md)，需求狀態與各版本驗收標準只在 [requirements.md](requirements.md)（「版本驗收標準」一版一個小節），驗收證據在對應 issue、PR 描述與 CI，尚未決定的設計問題與延伸設計只記問題、不記解法、不開 issue，集中在 [design-questions.md](design-questions.md)，統一整理後再把結論併入本文對應章節。本文不保存單次驗收日誌或重複需求狀態。
 
 ## 變數格式
 
