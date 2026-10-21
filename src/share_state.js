@@ -1,7 +1,9 @@
 /**
  * P7：把使用者調整的設定編進網址，並以同一份當次資料比較預設版與目前版本。
- * 網址只保存設定（數值覆寫、改寫的式子、自訂中文名稱、啟用中的歷史分位數條件），不保存電價或歷史摘要。
+ * 網址只保存設定（數值覆寫、改寫的式子、自訂中文名稱、啟用中的歷史分位數條件、P12 預調度範圍內最多循環數），不保存電價或歷史摘要。
  */
+
+import { MAX_CYCLES, valid_max_cycles } from "./cycles.js";
 
 export const SHARE_PARAM = "s";
 export const SHARE_VERSION = 1;
@@ -20,7 +22,7 @@ export const custom_key = (label) => `u_${[...label].map((char) => char.codePoin
 const is_object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const identifiers = (expression) => expression.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? [];
 
-/** 目前頁面上會影響結果的設定。歷史分位數只在啟用時保存。 */
+/** 目前頁面上會影響結果的設定。歷史分位數只在啟用時保存；循環上限只在使用者改過（不是預設）時保存。 */
 export function share_snapshot(state) {
   const expressions = { ...state.expression_overrides };
   const used = new Set(Object.values(expressions).flatMap(identifiers));
@@ -28,10 +30,12 @@ export function share_snapshot(state) {
   const history = state.scenario_history?.active
     ? { start: state.scenario_history.start, end: state.scenario_history.end, standard: state.scenario_history.standard, quantile: state.scenario_history.quantile, active: true }
     : null;
-  return { v: SHARE_VERSION, values: { ...state.value_overrides }, expressions, labels, history };
+  const snapshot = { v: SHARE_VERSION, values: { ...state.value_overrides }, expressions, labels, history };
+  if (Number.isInteger(state.max_cycles)) snapshot.max_cycles = state.max_cycles;
+  return snapshot;
 }
 
-export const is_default_snapshot = (snapshot) => !Object.keys(snapshot.values).length && !Object.keys(snapshot.expressions).length && !snapshot.history;
+export const is_default_snapshot = (snapshot) => !Object.keys(snapshot.values).length && !Object.keys(snapshot.expressions).length && !snapshot.history && snapshot.max_cycles === undefined;
 
 function to_base64url(text) {
   let binary = "";
@@ -60,7 +64,7 @@ export function decode_share(text, { registry, catalog }) {
   let data;
   try { data = JSON.parse(from_base64url(text)); } catch (error) { throw Error(error instanceof SyntaxError ? "內容不是有效的設定格式" : error.message); }
   if (!is_object(data)) throw Error("內容不是有效的設定格式");
-  const allowed = ["v", "values", "expressions", "labels", "history"];
+  const allowed = ["v", "values", "expressions", "labels", "history", "max_cycles"];
   const extra = Object.keys(data).filter((key) => !allowed.includes(key));
   if (extra.length) throw Error(`不支援的欄位：${extra.join("、")}`);
   if (data.v !== SHARE_VERSION) throw Error("分享網址的版本不支援");
@@ -104,7 +108,12 @@ export function decode_share(text, { registry, catalog }) {
     if (!QUANTILES.includes(h.quantile)) throw Error("歷史分位數只能是 P10、P50 或 P90");
     history = { start: h.start, end: h.end, standard: h.standard, quantile: h.quantile, active: true };
   }
-  return { v: SHARE_VERSION, values, expressions, labels, history };
+  const snapshot = { v: SHARE_VERSION, values, expressions, labels, history };
+  if (data.max_cycles !== undefined) {
+    if (!valid_max_cycles(data.max_cycles)) throw Error(`預調度範圍內最多循環數只能是 1 到 ${MAX_CYCLES} 的整數`);
+    snapshot.max_cycles = data.max_cycles;
+  }
+  return snapshot;
 }
 
 export function apply_share(state, snapshot) {
@@ -112,6 +121,7 @@ export function apply_share(state, snapshot) {
   state.expression_overrides = { ...snapshot.expressions };
   state.custom_labels = { ...snapshot.labels };
   state.scenario_history = snapshot.history ? { ...snapshot.history } : null;
+  state.max_cycles = snapshot.max_cycles ?? null;
 }
 
 export function read_share(search) {

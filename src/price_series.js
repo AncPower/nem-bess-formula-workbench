@@ -2,7 +2,7 @@
  * 電價曲線資料：實際（ACTUAL）5 分鐘價格聚合為完整 30 分鐘均價，預調度（FORECAST）維持 30 分鐘，
  * 並把選出的充放電時段對到時間軸上，供曲線圖使用。
  *
- * 不修改 predispatch.js：選窗仍由 best_single_cycle 負責，這裡只負責呈現用的資料整理。
+ * 不修改 predispatch.js：選窗由 best_single_cycle（單循環）與 cycles.js 的 best_cycles（P12 多循環）負責，這裡只負責呈現用的資料整理。
  */
 
 const PERIOD_TYPES = { ACTUAL: "actual", FORECAST: "forecast" };
@@ -56,25 +56,32 @@ export function leg_range(forecast, start, length) {
 /**
  * 合併兩條序列成同一條時間軸，並標出充電段、放電段與「實際／預測」分界。
  * @param {{actual: object[], forecast: object[]}} series
- * @param {object|null} cycle best_single_cycle 的結果
+ * @param {object|object[]|null} cycles 一個循環（best_single_cycle 的結果）或依時間排序的多個循環（best_cycles 的結果）
  * @param {string[]|null} window_times 指定時間軸（例如三天固定時段）；不給時用資料本身的時段
+ * @returns 模型的 cycles 列出每個循環的充放電段；charge／discharge 是第一個循環，維持單循環呼叫端的介面
  */
-export function build_chart_model(series, cycle, window_times = null) {
+export function build_chart_model(series, cycles, window_times = null) {
+  const list = Array.isArray(cycles) ? cycles.filter(Boolean) : cycles ? [cycles] : [];
   const times = window_times ?? [...new Set([...series.actual, ...series.forecast].map((point) => point.settlement_date))].sort();
   const lookup = (points) => new Map(points.map((point) => [point.settlement_date, point.price]));
   const actual = lookup(series.actual);
   const forecast = lookup(series.forecast);
   const rows = times.map((time) => ({ time, actual: actual.get(time) ?? null, forecast: forecast.get(time) ?? null }));
-  const leg = (start, average) => {
-    const range = cycle ? leg_range(series.forecast, start, cycle.periods_per_leg) : null;
+  const leg = (cycle, start, average) => {
+    const range = leg_range(series.forecast, start, cycle.periods_per_leg);
     return range ? { ...range, from: times.indexOf(range.first), to: times.indexOf(range.last), average } : null;
   };
+  const legs = list.map((cycle) => ({
+    charge: leg(cycle, cycle.charge_start, cycle.charge_average_price),
+    discharge: leg(cycle, cycle.discharge_start, cycle.discharge_average_price),
+  }));
   const prices = rows.flatMap((row) => [row.actual, row.forecast]).filter((price) => price !== null);
   const first_forecast = series.forecast.length ? times.findIndex((time) => time >= series.forecast[0].settlement_date) : -1;
   return {
     rows,
-    charge: cycle ? leg(cycle.charge_start, cycle.charge_average_price) : null,
-    discharge: cycle ? leg(cycle.discharge_start, cycle.discharge_average_price) : null,
+    charge: legs[0]?.charge ?? null,
+    discharge: legs[0]?.discharge ?? null,
+    cycles: legs,
     boundary: series.actual.length && first_forecast > 0 ? first_forecast : null,
     min: Math.min(0, ...prices),
     max: Math.max(0, ...prices),
