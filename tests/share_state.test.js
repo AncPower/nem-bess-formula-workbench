@@ -52,6 +52,10 @@ test("分享設定：不合格內容整份拒絕", () => {
   reject({ ...ok, values: { executed_cycle_net_revenue: 1 } }, /自動加總/);
   reject({ ...ok, expressions: { no_such_formula: "1" } }, /找不到公式/);
   reject({ ...ok, expressions: { spread: "1 + ".repeat(200) } }, /式子不合法/);
+  // V1-5c：白名單解析器不認得的式子，整份拒絕，而不是套用後顯示「無法計算」。
+  reject({ ...ok, expressions: { spread: "alert(1)" } }, /公式 spread 的式子無法解析：不支援的函式「alert」/);
+  reject({ ...ok, expressions: { spread: "discharge_price -" } }, /公式 spread 的式子無法解析/);
+  reject({ ...ok, expressions: { ...ok.expressions, spread: "(1" } }, /公式 spread 的式子無法解析/, "其他公式合法也不部分套用");
   reject({ ...ok, labels: { [fee]: "別的名稱" } }, /與代號不符/);
   reject({ ...ok, labels: { [custom_key("a−b")]: "a−b" } }, /不合法/);
   reject({ ...ok, history: { ...ok.history, quantile: "p75" } }, /P10、P50 或 P90/);
