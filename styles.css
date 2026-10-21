@@ -9,7 +9,7 @@
   --font-body: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   --font-mono: ui-monospace, Menlo, Consolas, monospace;
   --weight-regular: 400; --weight-strong: 600;
-  --size-xs: 12px; --size-sm: 14px; --size-md: 16px; --size-lg: 20px; --size-xl: 28px; --size-hero: 56px;
+  --size-xs: 13px; --size-sm: 16px; --size-md: 18px; --size-lg: 22px; --size-xl: 30px; --size-hero: 60px;
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-section: 24px; --space-block: 40px;
   --cat-price: #E1EAF4; --cat-battery: #E3EDDD; --cat-rule: #F4E8D4; --cat-scenario: #ECE4F2; --cat-custom: #FFFFFF; --cat-result: #FFFFFF;
   --cat-price-edge: #9DB5CF; --cat-battery-edge: #A3BE95; --cat-rule-edge: #D2B98D; --cat-scenario-edge: #B9A5CB;
@@ -68,7 +68,8 @@ main > .verdict-bar { border-top: none; margin-top: 0; padding-top: var(--space-
 .legend-forecast::before { border-top: 2px dashed var(--tide-low); height: 0 !important; }
 .legend-charge::before { background: var(--band-low); border-bottom: 2px solid var(--tide-low); }
 .legend-discharge::before { background: var(--band-high); border-top: 2px solid var(--tide-high); }
-.price-chart { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+.chart-stage { position: relative; }
+.price-chart { display: block; width: 100%; height: auto; font-family: var(--font-body); cursor: crosshair; touch-action: pan-y; user-select: none; }
 .price-chart .grid { stroke: var(--rule); stroke-width: 1; }
 .price-chart .axis-zero { stroke: var(--text-muted); stroke-width: 1; }
 .price-chart .tick, .price-chart .axis-title { fill: var(--text-muted); font-size: var(--size-xs); font-variant-numeric: tabular-nums; }
@@ -85,9 +86,14 @@ main > .verdict-bar { border-top: none; margin-top: 0; padding-top: var(--space-
 .price-chart .dot-actual { fill: var(--text-primary); }
 .price-chart .dot-forecast { fill: var(--tide-low); }
 .price-chart .boundary { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 3 3; }
-.price-chart .boundary-label { fill: var(--text-muted); font-size: var(--size-xs); }
 .price-chart .hit { fill: transparent; outline: none; }
-.price-chart .hit:hover, .price-chart .hit:focus-visible { fill: rgba(18, 48, 79, 0.08); stroke: var(--text-primary); stroke-width: 1; }
+.price-chart .hit:focus-visible { stroke: var(--text-primary); stroke-width: 1; }
+.price-chart .day-divider { stroke: var(--text-muted); stroke-width: 1; }
+.price-chart .day-label { fill: var(--text-primary); font-size: var(--size-sm); font-weight: var(--weight-strong); }
+.price-chart .cursor { stroke: var(--text-primary); stroke-width: 1; pointer-events: none; }
+.price-chart .selection { fill: rgba(18, 48, 79, 0.08); stroke: var(--text-primary); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+.chart-tip { position: absolute; top: 8px; z-index: 5; display: grid; gap: 2px; max-width: min(22rem, 90%); padding: var(--space-2) var(--space-3); background: var(--surface-raised); border: 1px solid var(--text-muted); border-radius: var(--radius-control); box-shadow: 0 2px 8px rgba(18, 48, 79, 0.12); font-size: var(--size-sm); line-height: 1.45; color: var(--text-primary); pointer-events: none; font-variant-numeric: tabular-nums; }
+.chart-tip strong { font-weight: var(--weight-strong); }
 .leg-summary { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-section); font-size: var(--size-sm); }
 
 /* 公式：每個變數是一個中文名稱框框，依類別上色；框裡直接改值 */
@@ -157,4 +163,5 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   main, .site-header { padding-left: var(--space-3); padding-right: var(--space-3); }
   h1 { font-size: var(--size-lg); }
   .verdict-word { font-size: var(--size-xl); }
+  .price-chart .day-label { font-size: var(--size-xs); }
 }
