@@ -5,6 +5,7 @@
  * 公式區同時是輸入區：式子裡每個變數都是一個中文名稱框框（依類別上色），框裡直接改數值；說明、單位與來源在滑鼠移上或聚焦時才顯示。
  * 改寫公式也用中文名稱，不出現英文代號；打一個新的中文名稱就會多一個輸入框。
  * 輸入時即時預覽（input 事件，短暫延遲後重算）；離開欄位或按 Enter（change 事件）才重建整頁。
+ * 分享與比較（P7）：設定可編進網址；比較區用同一份當次資料，並排預設版與目前版本。
  */
 
 import { compute } from "./engine.js";
@@ -16,6 +17,7 @@ import { build_chart_model, leg_range, parse_price_series, three_day_window } fr
 import { render_dispatch_chart } from "./price_chart.js";
 import { GROUPS, SHORT_LABELS, TERMS, group_of, short_label } from "./formula_help.js";
 import { FUNCTION_TEXT, from_chinese, to_chinese, to_parts } from "./formula_text.js";
+import { apply_share, compare_rows, custom_key, decode_share, encode_share, read_share, share_snapshot, share_url } from "./share_state.js";
 
 const TABS = ["predispatch", "scenario"];
 const PAGE_COPY = {
@@ -33,7 +35,7 @@ const GUIDANCE_LABELS = { principle: "原則", method: "方法", how_to_choose: 
 const CATEGORY_LABELS = Object.fromEntries([...GROUPS.map((group) => [group.id, group.label]), ["result", "計算結果"]]);
 const PREVIEW_DELAY_MS = 200;
 
-const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, custom_labels: {}, data_status: null };
+const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, custom_labels: {}, data_status: null, scenario_history: null, share_notice: null };
 const view = { results: new Map(), result_chips: new Map(), inputs: new Map(), aggregates: new Map(), editing: new Set(), timer: null, decision: null, width: null };
 
 const element = (tag, attributes = {}, text) => {
@@ -56,18 +58,21 @@ function format_value(value, format, unit) {
 }
 const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
 
-function evaluate_view() {
+/** 預設版：沒有任何覆寫、改寫或歷史模式，但沿用同一份當次資料。 */
+const default_settings = () => ({ value_overrides: {}, expression_overrides: {}, scenario_history: null });
+
+function evaluate_view(settings = state) {
   const tab = current_tab();
-  const historical = state.scenario_history;
-  const use_history = historical?.active && !Object.hasOwn(state.value_overrides, "daily_revenue");
+  const historical = settings.scenario_history;
+  const use_history = historical?.active && !Object.hasOwn(settings.value_overrides, "daily_revenue");
   const args = {
     registry: state.registry,
     catalog: use_history ? { ...state.catalog, variables: state.catalog.variables.map((entry) => entry.key === "daily_revenue"
       ? { ...entry, source: { type: "data", ref: "scenario.daily_revenue" }, hint: `歷史 ${historical.quantile.toUpperCase()}：${historical.start} 至 ${historical.end}；事後價格，不是預測` } : entry) } : state.catalog,
     context: { config: state.config, data: { ...state.data, scenario: historical } },
     variable_errors: use_history && historical.error ? { daily_revenue: historical.error } : {},
-    value_overrides: state.value_overrides,
-    expression_overrides: state.expression_overrides,
+    value_overrides: settings.value_overrides,
+    expression_overrides: settings.expression_overrides,
   };
   const base = compute(args);
   const plan = compute_day({ ...args, cycles: [state.data] });
@@ -99,7 +104,7 @@ function key_of(word) {
   const hit = known.find(([label]) => label === word);
   if (hit) return hit[1];
   if (/^[a-z_][a-z0-9_]*$/.test(word)) return word;
-  const key = `u_${[...word].map((char) => char.codePointAt(0).toString(36)).join("_")}`;
+  const key = custom_key(word);
   state.custom_labels[key] = word;
   return key;
 }
@@ -122,6 +127,7 @@ function render() {
   render_data_bar(result.tab);
   render_chart(result);
   render_formulas(result);
+  render_compare(result);
   set_status("done");
 }
 
@@ -142,6 +148,7 @@ function refresh() {
   }
   render_verdict(result);
   render_chart(result);
+  render_compare(result);
   set_status("done");
 }
 
@@ -254,6 +261,90 @@ function render_chart({ tab, results }) {
   const model = build_chart_model(state.series, state.data.predispatch ?? null, timeline?.times ?? null);
   render_dispatch_chart(container, model, { decision: label, power_mw: state.config.battery?.power_mw ?? 0, animate, days: timeline?.days ?? null });
   if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有實際電價時段，只畫出預調度電價。"));
+}
+
+/** 改了哪些設定：數值列出預設 → 你的；改寫的公式列出中文式子；啟用中的歷史分位數列出條件。 */
+function setting_changes(base_variables) {
+  const items = [];
+  for (const [key, value] of Object.entries(state.value_overrides)) {
+    const base = find_variable(base_variables, key);
+    if (!base) items.push(`${label_of(key)}（你新增的）＝ ${plain_number(value)}`);
+    else if (base.value !== value) items.push(`${label_of(key)}：${plain_number(base.value)} → ${plain_number(value)}`);
+  }
+  for (const [id, expression] of Object.entries(state.expression_overrides)) {
+    items.push(`改寫「${label_of(id)}」＝ ${to_chinese(expression, label_of)}`);
+  }
+  const history = state.scenario_history;
+  if (history?.active && !Object.hasOwn(state.value_overrides, "daily_revenue")) {
+    items.push(`每日淨收益改用歷史 ${history.quantile.toUpperCase()}（${history.start} 至 ${history.end}，價差標準 ${plain_number(Number(history.standard))} AUD/MWh）`);
+  }
+  return items;
+}
+
+function compare_cell(formula, result) {
+  if (!result || result.error) return "無法計算";
+  return format_value(result.value, formula.format, formula.unit);
+}
+
+function delta_text(row) {
+  if (row.same) return "相同";
+  if (row.format === "decision" || row.delta === null) return "不同";
+  const sign = row.delta > 0 ? "+" : "−";
+  const size = Math.abs(row.delta);
+  return row.format === "currency" ? `${sign}A$ ${size.toLocaleString("zh-TW", { maximumFractionDigits: 0 })}` : `${sign}${plain_number(size)}${row.unit && row.unit !== "—" ? ` ${row.unit}` : ""}`;
+}
+
+/** 與預設值比較：同一份當次資料下，預設版與目前版本逐條並排。 */
+function render_compare(current) {
+  const body = document.getElementById("compare-body");
+  if (!body) return;
+  const nodes = [];
+  if (state.share_notice) nodes.push(element("p", { class: state.share_notice.error ? "error" : "note" }, state.share_notice.text));
+  const base = evaluate_view(default_settings());
+  const changes = setting_changes(base.variables);
+  if (changes.length === 0) {
+    nodes.push(element("p", { class: "compare-same" }, "目前與預設相同。"));
+    body.replaceChildren(...nodes);
+    return;
+  }
+  const list = element("ul", { class: "compare-changes", "aria-label": "你改了哪些設定" });
+  for (const text of changes) list.append(element("li", {}, text));
+  nodes.push(list);
+  const table = element("table", { class: "compare-table" });
+  const head = element("tr");
+  for (const text of ["公式", "預設", "你的版本", "差異"]) head.append(element("th", { scope: "col" }, text));
+  table.append(head);
+  for (const row of compare_rows(current.visible, base.results, current.results)) {
+    const formula = current.visible.find((item) => item.id === row.id);
+    const tr = element("tr", row.same ? {} : { class: "changed-row" });
+    tr.append(element("th", { scope: "row" }, row.name), element("td", {}, compare_cell(formula, row.base)), element("td", {}, compare_cell(formula, row.current)), element("td", {}, delta_text(row)));
+    table.append(tr);
+  }
+  nodes.push(table);
+  body.replaceChildren(...nodes);
+}
+
+async function share_settings() {
+  const output = document.getElementById("share-output");
+  if (!output) return;
+  let url;
+  try {
+    const snapshot = share_snapshot(state);
+    decode_share(encode_share(snapshot), { registry: state.registry, catalog: state.catalog });
+    url = share_url(location, snapshot, current_tab());
+  } catch (error) {
+    output.replaceChildren(element("p", { class: "error" }, `無法產生分享網址：${error.message}`));
+    return;
+  }
+  const field = element("input", { type: "text", readonly: "", value: url, "aria-label": "分享網址", class: "share-url" });
+  const status = element("p", { class: "note", role: "status" }, "複製中…");
+  output.replaceChildren(field, status);
+  try {
+    await globalThis.navigator.clipboard.writeText(url);
+    status.textContent = "已複製分享網址。只保存設定，不保存電價；對方開啟時會依當下取得的電價重算。";
+  } catch {
+    status.textContent = "無法自動複製，請手動複製上方網址。只保存設定，不保存電價。";
+  }
 }
 
 function paint_result(node, formula, result) {
@@ -471,13 +562,27 @@ async function start() {
   const problems = check_registry(registry, catalog);
   if (problems.length > 0) throw new Error(`公式登記檔有問題：${problems.join("；")}`);
   Object.assign(state, { registry, catalog, config: { battery, spread_standard } });
+  const shared = read_share(location.search);
+  if (shared !== null) {
+    try {
+      apply_share(state, decode_share(shared, { registry, catalog }));
+      state.share_notice = { text: "已套用分享網址的設定；電價依開啟當下取得的資料重算，結果可能與分享時不同。" };
+    } catch (error) {
+      state.share_notice = { error: true, text: `分享網址無法套用：${error.message}。已用預設值開啟。` };
+    }
+  }
   document.getElementById("reset-all").addEventListener("click", () => {
     state.value_overrides = {};
     state.expression_overrides = {};
+    state.custom_labels = {};
     state.scenario_history = null;
+    state.share_notice = null;
+    document.getElementById("share-output")?.replaceChildren();
+    if (location.search && typeof window.history?.replaceState === "function") window.history.replaceState(null, "", `${location.pathname}${location.hash}`);
     view.editing.clear();
     render();
   });
+  document.getElementById("share-settings")?.addEventListener("click", share_settings);
   window.addEventListener("hashchange", render);
   const chart = document.getElementById("price-chart");
   if (chart && typeof ResizeObserver === "function") {
