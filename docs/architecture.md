@@ -6,7 +6,7 @@
 |---|---|---|
 | 骨幹 | `src/expression.js` 式子解析器、`src/engine.js` 計算引擎、`src/day.js` 逐循環與每日彙總編排、`src/registry_check.js` 格式檢查、`src/predispatch.js` 資料轉接、`src/app.js` 介面 | 低 |
 | 肌肉 | `formulas/registry.json` 公式、`formulas/variables.json` 變數 | 高 |
-| 設定 | `config/battery.json` 設備參數、價差標準 | 經 PR 檢討後才改 |
+| 設定 | `config/battery.json` 設備參數、`config/spread_standard.json` 價差標準 | 經 PR 檢討後才改 |
 
 新增一條公式只要在 `formulas/registry.json` 多加一筆；需要新輸入時在 `formulas/variables.json` 多加一筆。骨幹不用改。
 
