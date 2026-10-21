@@ -12,7 +12,7 @@ AEMO API ─> src/ 資料轉接 ───────┘
 AEMO MMSDM ─> analysis/ ─> data/daily_summary.json ─> 情境評估分頁
 ```
 
-頁面是沒有後端的靜態網站，`main` 合併即上線。兩個分頁共用同一份公式登記檔、變數目錄、計算引擎與設定。
+頁面是沒有後端的靜態網站，`main` 合併即上線。兩個分頁共用同一份公式登記檔、變數目錄、計算引擎與設定。各層的設計與不變條件見 architecture.md「骨幹與肌肉」。
 
 ## 2. 更新頻率標記
 
@@ -96,7 +96,6 @@ AEMO MMSDM ─> analysis/ ─> data/daily_summary.json ─> 情境評估分頁
 | `analysis/download.py` | 下載 AEMO `TRADINGPRICE` 月檔、驗證快取雜湊、正規化成 `.cache/history.json` | 見「每月更新與重產歷史資料」 | 每月執行 |
 | `analysis/build.mjs` | 產製每日單循環摘要；`FINGERPRINT_PATHS` 定義指紋範圍 | 改了要重產摘要 | 很少；**在指紋範圍** |
 | `analysis/verify.mjs` | 驗證摘要的指紋、來源與有效日 | CI 每次都會跑 | 很少 |
-| `analysis/publish_snapshot.py` | 首次發布摘要用，只在 `feat/t6-p13-standalone-data` 分支的 PR 執行 | 一般開發不要用 | 一次性 |
 | `data/daily_summary.json` | 已發布的每日單循環摘要 | 不要手改；只能由 `build.mjs` 產生 | 每月 |
 | `.cache/` | 原始 ZIP、manifest 與正規化資料 | 已列入 gitignore，不提交 | 每月 |
 
@@ -125,14 +124,14 @@ AEMO MMSDM ─> analysis/ ─> data/daily_summary.json ─> 情境評估分頁
 
 | 檔案 | 用途 | 頻率 |
 |---|---|---|
-| `workflows/ci.yml` | 每個 PR 與 `main`：Python 測試、Node 測試、驗證摘要；沒有摘要時才下載並產製 | 很少 |
+| `workflows/ci.yml` | 每個 PR 與 `main`：Python 測試、Node 測試、驗證摘要；沒有摘要時才下載並產製；只有唯讀權限，不推送任何提交 | 很少 |
 
 ## 4. 我要改 X，寫在哪裡
 
 | 我要… | 主要改 | 一起改 | 要不要重產摘要 |
 |---|---|---|---|
 | 新增或改寫公式 | `formulas/registry.json`（需要新輸入時加 `variables.json`） | 有新需求就在 requirements.md 加一列 | 要 |
-| 只改公式說明或名稱 | `registry.json` | 無 | 目前要（整份檔案算進指紋） |
+| 只改公式說明或名稱 | `registry.json` | 無 | 目前要（整份檔案算進指紋，見 design-questions.md D2） |
 | 改設備預設值 | `config/battery.json` | 在 PR 說明檢討理由 | 要 |
 | 改價差標準、循環上限 | `config/spread_standard.json`、`config/dispatch.json` | 在 PR 說明檢討理由 | 不用 |
 | 改選窗規則 | `cycles.js` 或 `predispatch.js` | architecture.md「預調度多循環」 | 動到 `predispatch.js` 才要 |
@@ -143,10 +142,11 @@ AEMO MMSDM ─> analysis/ ─> data/daily_summary.json ─> 情境評估分頁
 | 有設計還沒決定 | design-questions.md 新增一條 Dn | 無 | 不用 |
 | 每月更新歷史資料 | 照下一節的命令 | README「資料」表 | 這件事本身就是重產 |
 | 放驗收證據 | issue 留言、PR 描述 | requirements.md 只放連結 | 不用 |
+| 新增、刪除或搬移檔案 | 該檔案 | 本文件對應表格；搬移指紋範圍內的檔案時同步 `FINGERPRINT_PATHS` | 動到指紋範圍才要 |
 
 ## 每月更新與重產歷史資料
 
-需要網際網路，在本機執行；CI 只在沒有摘要時才下載，不會自動重產。期間改成要涵蓋的交易日。
+需要網際網路，在本機執行；CI 只在沒有摘要時才下載，不會自動重產，也不會推送結果。期間改成要涵蓋的交易日。
 
 ```bash
 python3 analysis/download.py --start YYYY-MM-DD --end YYYY-MM-DD
@@ -154,9 +154,9 @@ node analysis/build.mjs
 node analysis/verify.mjs
 ```
 
-`download.py` 預設把月檔快取在 `.cache/aemo`、輸出 `.cache/history.json`（可用 `--cache`、`--output` 改）；`build.mjs` 預設讀 `.cache/history.json`，寫入 `data/daily_summary.json`。完成後提交 `data/daily_summary.json`，並更新 README「資料」表的涵蓋期間與最後產製日。
+`download.py` 預設把月檔快取在 `.cache/aemo`、輸出 `.cache/history.json`（可用 `--cache`、`--output` 改）；`build.mjs` 預設讀 `.cache/history.json`，寫入 `data/daily_summary.json`。完成後以 PR 提交 `data/daily_summary.json`，並更新 README「資料」表的涵蓋期間與最後產製日。
 
-只是因為改了指紋範圍內的檔案而重產時，沿用 README「資料」表目前的期間。
+只是因為改了指紋範圍內的檔案而重產時，沿用 README「資料」表目前的期間，並在同一個 PR 提交新摘要。
 
 ## 5. 不能破壞的規則
 
@@ -172,13 +172,12 @@ node analysis/verify.mjs
 ## 6. 寫法慣例
 
 - 檔名與函式名用 snake_case；ES module；不加 npm 依賴。
-- 新的 `src/` 檔案開頭寫註解：用途、不做什麼、對應的文件章節（參考 `app.js` 檔頭）。
+- 新的 `src/` 檔案開頭寫註解：用途、不做什麼、對應的文件章節（參考 `app.js` 檔頭）。既有檔案不為了補註解而改動，避免碰到指紋範圍。
 - Commit 用 Conventional Commits、英文、scope 寫模組名，結尾附 issue 編號，例如 `fix(prices): aggregate complete 5-minute actuals (#15)`。
 - 分支命名：`feat/`、`fix/`、`docs/` 加主題與 issue 編號；PR 標題與內容用繁體中文。
 - 合併一律用一般 merge commit，不用 squash。
 
 ## 7. 已知待整理
 
-- `app.js` 過大而且最常改：新功能先另開檔案。
-- 公式說明與名稱被指紋綁住：是否縮小指紋範圍屬設計決定，先寫成 design-questions.md 的一條再討論。
-- CI 的首次發布步驟已不再需要，但 job 仍對每個 PR 取得 `contents: write` 權限。
+- `app.js` 過大而且最常改：新功能先另開檔案；是否拆分既有內容等 v1 驗收（#18）結束後再決定。
+- 公式說明與名稱被指紋綁住：問題紀錄在 design-questions.md D2，待整理。
