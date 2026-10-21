@@ -67,7 +67,7 @@ const plan = compute_day({
 
 | 項目 | 規則 |
 |---|---|
-| 目標 | 與 `best_single_cycle()` 相同：最大化各循環「來回效率 × 放電均價 − 充電均價」的加總；不含 MLF 與損耗成本，與單循環選窗一致（已知問題見 [design-questions.md](design-questions.md) D1） |
+| 目標 | 與 `best_single_cycle()` 相同：最大化各循環「來回效率 × 放電均價 − 充電均價」的加總；不含 MLF 與損耗成本，與單循環選窗一致（v1 之後的延伸設計討論見 [design-questions.md](design-questions.md) D1，不阻擋 v1 驗收） |
 | 上限 1 | 直接回傳 `best_single_cycle()` 的結果，完全相同（含同分取最早） |
 | 上限 2 | 以分割點掃描：分割點前最佳循環＋分割點後最佳循環，O(n²) 以內；加總要嚴格高於最佳單循環（容忍 1e-9）才排兩個，否則維持一個 |
 | 時段不足 | 預調度時段少於 4 段時只回一個循環；少於 2 段時回空陣列 |
@@ -158,7 +158,7 @@ const plan = compute_day({
 
 該首次發布腳本使用 GitHub Token，並回填新摘要提交的 `test` 狀態；這是指向來源流程的證據，不等於新提交已重新執行完整 CI。合併必須以最新內容的實際完整 check 為準。這不是每月自動更新機制，也不會自動修改標準或合併。
 
-文件分工固定：設計在本文件，操作在 README，需求狀態只在 [requirements.md](requirements.md)，驗收證據在對應 PR 描述與 CI，尚未決定的設計問題只記問題、不記解法，集中在 [design-questions.md](design-questions.md)，統一整理後再把結論併入本文對應章節。本文不保存單次驗收日誌或重複需求狀態。
+文件分工固定：設計在本文件，操作在 README，需求狀態與各版本驗收標準只在 [requirements.md](requirements.md)（「版本驗收標準」一版一個小節），驗收證據在對應 issue、PR 描述與 CI，尚未決定的設計問題與延伸設計只記問題、不記解法、不開 issue，集中在 [design-questions.md](design-questions.md)，統一整理後再把結論併入本文對應章節。本文不保存單次驗收日誌或重複需求狀態。
 
 ## 變數格式
 
