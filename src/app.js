@@ -65,6 +65,17 @@ function format_value(value, format, unit) {
 }
 const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
 
+/** 輸入框寬度（字元數）；自動加總框顯示格式化後的金額，放寬上限避免被裁掉。 */
+const chip_width = (text, wide = false) => `--chars: ${Math.min(wide ? 16 : 10, Math.max(3, String(text).length))}`;
+
+/** 自動加總框：沿用被加總公式的顯示格式（金額整元、千分位），不顯示浮點誤差（V1-4c）；只改顯示，不改計算值。 */
+function aggregate_text(key, value) {
+  const source = state.registry.aggregates?.[key]?.formula;
+  const formula = state.registry.formulas.find((item) => item.id === source);
+  const format = formula?.format === "decision" ? "number" : formula?.format;
+  return format_value(value, format, formula?.unit && formula.unit !== "—" ? formula.unit : "");
+}
+
 /** 預設版：沒有任何覆寫、改寫或歷史模式，但沿用同一份當次資料。 */
 const default_settings = () => ({ value_overrides: {}, expression_overrides: {}, scenario_history: null, max_cycles: null });
 
@@ -167,7 +178,10 @@ function refresh() {
   }
   for (const [key, inputs] of view.aggregates) {
     const variable = result.variables.find((entry) => entry.key === key);
-    if (variable) for (const input of inputs) input.value = String(variable.value);
+    if (variable) for (const input of inputs) {
+      input.value = aggregate_text(key, variable.value);
+      input.setAttribute("style", chip_width(input.value, true));
+    }
   }
   render_verdict(result);
   render_chart(result);
@@ -277,6 +291,9 @@ function current_trust() {
   return data_trust({ status: state.data_status, series: state.series, value_overrides: state.value_overrides, now: Date.now() });
 }
 
+/** 資料列的時效後綴：可能過期或即時都明示，不靠「其他標示沒出現」判斷（V1-3a）。 */
+const freshness_suffix = (kind) => (kind === "stale" ? "，可能過期" : kind === "live" ? `，即時資料（${STALE_MINUTES} 分鐘內）` : "");
+
 function render_data_bar(tab) {
   const bar = document.getElementById("data-bar");
   const history = document.getElementById("history-panel");
@@ -301,7 +318,7 @@ function render_data_bar(tab) {
     if (trust.at !== null && trust.at !== undefined) {
       const ended = new Date(trust.at + 10 * 60 * 60000).toISOString().slice(0, 16).replace("T", " ");
       const name = state.series.actual_source.count ? "最後實際時段" : "資料參考時段";
-      bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `${name}結束於 NEM ${ended}（UTC+10）${trust.kind === "stale" ? "，可能過期" : ""}`));
+      bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `${name}結束於 NEM ${ended}（UTC+10）${freshness_suffix(trust.kind)}`));
     }
     else if (trust.kind === "stale") bar.append(element("span", { class: "error" }, "無法判斷資料時間，可能過期"));
   } else bar.append(element("span", {}, "尚未讀取，目前用預設均價。"));
@@ -497,12 +514,16 @@ function name_chip(name, formula_id, { variables, results }) {
   const chip = element("span", { class: `chip cat-${category}${variable?.origin === "user" ? " overridden" : ""}` });
   chip.append(element("label", { for: id, class: "chip-name" }, label));
   const round_input = name === "charge_price" || name === "discharge_price" || name === "daily_revenue";
-  const display = round_input ? price_input(variable?.value ?? 0) : String(variable?.value ?? 0);
-  const input = element("input", { id, type: "number", step: "any", inputmode: "decimal", value: history_error ? "" : display, "data-key": name, "aria-describedby": tip_id });
+  const aggregate = variable?.origin === "aggregate";
+  const display = aggregate ? aggregate_text(name, variable.value) : round_input ? price_input(variable?.value ?? 0) : String(variable?.value ?? 0);
+  // 自動加總不能直接改，改用唯讀文字框才能顯示千分位與貨幣符號。
+  const input = element("input", aggregate
+    ? { id, type: "text", readonly: "", value: display, "data-key": name, "aria-describedby": tip_id }
+    : { id, type: "number", step: "any", inputmode: "decimal", value: history_error ? "" : display, "data-key": name, "aria-describedby": tip_id });
   let dirty = false;
-  const size = () => input.setAttribute("style", `--chars: ${Math.min(10, Math.max(3, String(input.value).length))}`);
+  const size = () => input.setAttribute("style", chip_width(input.value, aggregate));
   size();
-  if (variable?.origin === "aggregate") {
+  if (aggregate) {
     input.setAttribute("disabled", "");
     if (!view.aggregates.has(name)) view.aggregates.set(name, []);
     view.aggregates.get(name).push(input);

@@ -61,6 +61,11 @@ test("P12 預調度範圍內兩個循環：逐循環判斷、加總、上限切�
     assert.equal(page.result("價差"), "循環 1 140 AUD/MWh · 循環 2 170 AUD/MWh", "每循環公式逐循環列出");
     assert.equal(page.result("執行或等待"), "循環 1 執行 · 循環 2 執行");
     assert.equal(page.result("每日執行淨收益"), "A$ 6,200", "只加總執行的循環");
+    // V1-4c：加總框用金額格式（千分位、整元），不顯示原始浮點數。
+    const total = () => page.input("executed_cycle_net_revenue");
+    assert.equal(total().value, "A$ 6,200", "加總框用金額格式");
+    assert.equal(total().attributes.type, "text", "數字框無法顯示千分位，改用唯讀文字框");
+    assert.equal(total().attributes.disabled, "", "自動加總仍不能直接改");
     assert.ok(descendants(page.card("每日執行淨收益")).some((node) => node.textContent === "彙總：預調度範圍內已執行的循環"));
     assert.equal(page.bands("charge"), 16, "兩個循環的充電長條都畫出");
     assert.equal(page.bands("discharge"), 16);
@@ -68,10 +73,14 @@ test("P12 預調度範圍內兩個循環：逐循環判斷、加總、上限切�
     assert.ok(page.legs()[3].endsWith("+5 MW · 執行"));
     assert.match(page.compare(), /目前與預設相同/);
 
-    page.input("spread_standard").value = "150"; page.input("spread_standard").listeners.change();
+    page.input("spread_standard").value = "150"; page.input("spread_standard").listeners.input();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(total().value, "A$ 3,400", "即時預覽更新加總框也用金額格式");
+    page.input("spread_standard").listeners.change();
     assert.equal(page.word(), "等待", "循環 1 不達標");
     assert.match(page.why(), /^循環 1：等待（價差 140 < 150，淨收益 A\$ 2,800） · 循環 2：執行（價差 170 ≥ 150/);
     assert.equal(page.result("每日執行淨收益"), "A$ 3,400", "不達標的循環不計入");
+    assert.equal(total().value, "A$ 3,400", "重建整頁後加總框仍是金額格式");
     assert.ok(page.legs()[1].endsWith("· 等待") && page.legs()[3].endsWith("· 執行"), "排程圖逐循環標判斷");
     page.ids["reset-all"].listeners.click();
 

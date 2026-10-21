@@ -4,6 +4,7 @@
  */
 
 import { MAX_CYCLES, valid_max_cycles } from "./cycles.js";
+import { parse_expression } from "./expression.js";
 
 export const SHARE_PARAM = "s";
 export const SHARE_VERSION = 1;
@@ -78,6 +79,8 @@ export function decode_share(text, { registry, catalog }) {
   for (const [id, expression] of Object.entries(data.expressions)) {
     if (!formula_ids.has(id)) throw Error(`找不到公式 ${id}`);
     if (typeof expression !== "string" || !expression.trim() || expression.length > MAX_EXPRESSION) throw Error(`公式 ${id} 的式子不合法`);
+    // 竄改的式子（例如不支援的函式）在這裡就整份拒絕，不留到計算時才顯示「無法計算」。
+    try { parse_expression(expression); } catch (error) { throw Error(`公式 ${id} 的式子無法解析：${error.message}`); }
     expressions[id] = expression;
   }
 
