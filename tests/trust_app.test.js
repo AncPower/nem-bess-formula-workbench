@@ -15,7 +15,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 const load = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"));
 const PRICES = { "5MIN": [
   ...Array.from({ length: 16 }, (_, index) => ({ REGIONID: "NSW1", PERIODTYPE: "FORECAST", SETTLEMENTDATE: `2026-10-21T${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}:00`, RRP: index < 8 ? 35 : 190 })),
-  { REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: "2026-10-20T23:30:00", RRP: 88 },
+  ...Array.from({ length: 6 }, (_, i) => ({ REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: new Date(Date.parse("2026-10-20T23:05:00Z") + i * 300000).toISOString().slice(0, 19), RRP: 88 })),
 ] };
 
 test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取中、讀取失敗不沿用舊電價", async () => {
@@ -46,6 +46,25 @@ test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取�
     assert.match(word().attributes.class, /decision-go/);
     assert.match(bar(), /最後實際時段 10 分鐘前/);
     assert.ok(chart().some((node) => node.tag === "li" && node.textContent.endsWith("+5 MW · 執行")));
+
+    const compare = () => descendants(ids["compare-body"]).map((node) => node.textContent).join("|");
+    respond = async () => ({ "5MIN": PRICES["5MIN"].map((row) => row.PERIODTYPE === "FORECAST" && row.RRP === 35 ? { ...row, RRP: 35.123456789 } : row) });
+    reload(); await flush(); await flush();
+    assert.equal(input("charge_price").value, "35.12", "價格框只顯示兩位");
+    assert.ok(chart().some((node) => node.attributes.class === "average-charge"), "圖表仍有原精度均價線");
+    assert.match(compare(), /目前與預設相同/, "顯示四捨五入不建立價格覆寫");
+    input("spread_standard").value = "154.878"; input("spread_standard").listeners.change();
+    assert.equal(word().textContent, "等待", "原始價差 154.876543211 小於門檻，若誤用 35.12 則會變成執行");
+    const precise_reason = why();
+    input("charge_price").listeners.change();
+    assert.equal(word().textContent, "等待", "未輸入就離開欄位不變成手動試算");
+    assert.equal(why(), precise_reason, "不把四捨五入值寫回計算");
+    input("charge_price").value = "35.12"; input("charge_price").listeners.input(); input("charge_price").listeners.change();
+    assert.equal(word().textContent, "手動試算", "實際輸入相同顯示值仍算手動覆寫");
+    assert.match(why(), /試算結果：執行/, "實際修改後才用 35.12 計算");
+    ids["reset-all"].listeners.click();
+    respond = async () => PRICES;
+    reload(); await flush(); await flush();
 
     input("charge_price").value = "50"; input("charge_price").listeners.change();
     assert.equal(word().textContent, "手動試算", "手動改均價不能當作當下建議");

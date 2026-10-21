@@ -6,9 +6,11 @@ import { best_single_cycle, parse_report } from "../src/predispatch.js";
 
 const row = (time, price, type = "FORECAST", region = "NSW1") => ({ REGIONID: region, PERIODTYPE: type, SETTLEMENTDATE: time, RRP: price });
 const at = (hour, minute = 0) => `2026-10-21T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+// 六個真實 5 分鐘時段，維持原本對兩個 30 分鐘均價的全部斷言。
+const actual = (end, price) => Array.from({ length: 6 }, (_, i) => row(new Date(Date.parse(`${end}Z`) - (5 - i) * 300000).toISOString().slice(0, 19), price, "ACTUAL"));
 
 test("同一份回應分出實際與預調度電價，只取 NSW1 並排序", () => {
-  const series = parse_price_series({ "5MIN": [row(at(2), 5), row(at(1, 30), 3), row(at(1), 9, "FORECAST", "QLD1"), row(at(0, 30), 1, "ACTUAL"), row(at(0), 2, "ACTUAL"), row(at(3), 7, "OTHER")] });
+  const series = parse_price_series({ "5MIN": [row(at(2), 5), row(at(1, 30), 3), row(at(1), 9, "FORECAST", "QLD1"), ...actual(at(0, 30), 1), ...actual(at(0), 2), row(at(3), 7, "OTHER")] });
   assert.deepEqual(series.actual.map((point) => point.price), [2, 1]);
   assert.deepEqual(series.forecast.map((point) => point.price), [3, 5]);
 });
@@ -21,7 +23,7 @@ test("格式不符時指出哪一列；沒有任何電價時報錯", () => {
 
 test("曲線模型：充放電段與選窗結果、均價一致，並標出實際與預測分界", () => {
   const prices = [50, 10, 10, 60, 200, 200, 30, 100];
-  const payload = { "5MIN": [row(at(0), 70, "ACTUAL"), row(at(0, 30), 65, "ACTUAL"), ...prices.map((price, index) => row(at(1 + Math.floor(index / 2), index % 2 ? 30 : 0), price))] };
+  const payload = { "5MIN": [...actual(at(0), 70), ...actual(at(0, 30), 65), ...prices.map((price, index) => row(at(1 + Math.floor(index / 2), index % 2 ? 30 : 0), price))] };
   const series = parse_price_series(payload);
   const cycle = best_single_cycle(parse_report(payload), { power_mw: 5, capacity_mwh: 5, round_trip_efficiency: 1 });
   const model = build_chart_model(series, cycle);
