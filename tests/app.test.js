@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { build, fingerprint } from "../analysis/build.mjs";
@@ -17,6 +17,8 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
  test("實際 app 串接：分頁標題、結論、排程圖、中文名稱框框、改寫公式、分頁、錯誤與還原", async () => {
   const saved = Object.fromEntries(["document", "window", "location", "fetch"].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   try {
+    // T8：模擬 AEMO 回應的最後實際時段是 NEM 2026-10-20 23:30，固定在 10 分鐘後，讓資料維持即時。
+    mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-10-20T23:40:00+10:00") });
     const load = (path) => JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url)));
     const sample = build({ region_id: "NSW1", start_date: "2026-07-01", end_date: "2026-07-01", sources: [{ url: "https://nemweb.com.au/test" }], prices: Array.from({ length: 288 }, (_, index) => [new Date(Date.parse("2026-07-01") + (index + 1) * 300000).toISOString().slice(0, 16), index < 144 ? 40 : 180]) }, load("formulas/registry.json"), load("formulas/variables.json"), load("config/battery.json"));
     sample.input_fingerprint = await fingerprint();
@@ -170,6 +172,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     assert.equal(links[1].attributes["aria-current"], "page");
     await flush();
   } finally {
+    mock.timers.reset();
     for (const [key, descriptor] of Object.entries(saved)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else delete globalThis[key];

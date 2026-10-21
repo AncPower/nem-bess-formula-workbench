@@ -6,6 +6,7 @@
  * 改寫公式也用中文名稱，不出現英文代號；打一個新的中文名稱就會多一個輸入框。
  * 輸入時即時預覽（input 事件，短暫延遲後重算）；離開欄位或按 Enter（change 事件）才重建整頁。
  * 分享與比較（P7）：設定可編進網址；比較區用同一份當次資料，並排預設版與目前版本。
+ * 資料可信度（T8）：只有即時資料才在結論列給「執行／等待」；手動試算、讀取中、讀取失敗、可能過期都另外標示。
  */
 
 import { compute } from "./engine.js";
@@ -17,6 +18,7 @@ import { build_chart_model, leg_range, parse_price_series, three_day_window } fr
 import { render_dispatch_chart } from "./price_chart.js";
 import { GROUPS, SHORT_LABELS, TERMS, group_of, short_label } from "./formula_help.js";
 import { FUNCTION_TEXT, from_chinese, to_chinese, to_parts } from "./formula_text.js";
+import { STALE_MINUTES, data_trust } from "./data_trust.js";
 import { apply_share, compare_rows, custom_key, decode_share, encode_share, read_share, share_snapshot, share_url } from "./share_state.js";
 
 const TABS = ["predispatch", "scenario"];
@@ -34,6 +36,7 @@ const ORIGIN_LABELS = { user: "你調整的值", data: "來自資料", config: "
 const GUIDANCE_LABELS = { principle: "原則", method: "方法", how_to_choose: "建議怎麼選" };
 const CATEGORY_LABELS = Object.fromEntries([...GROUPS.map((group) => [group.id, group.label]), ["result", "計算結果"]]);
 const PREVIEW_DELAY_MS = 200;
+const TRUST_CHECK_MS = 60 * 1000;
 
 const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, custom_labels: {}, data_status: null, scenario_history: null, share_notice: null };
 const view = { results: new Map(), result_chips: new Map(), inputs: new Map(), aggregates: new Map(), editing: new Set(), timer: null, decision: null, width: null };
@@ -187,19 +190,35 @@ function render_verdict({ tab, results, variables }) {
     const cycle = find_result(results, "cycle_net_revenue");
     const daily = find_result(results, "daily_net_revenue");
     const standard = find_variable(variables, "spread_standard");
-    if (!decision || decision.error) {
+    const trust = current_trust();
+    if (trust.kind === "loading" || trust.kind === "error" || trust.kind === "none") {
+      word.textContent = { loading: "讀取中", error: "讀取失敗", none: "尚未取得電價" }[trust.kind];
+      word.setAttribute("class", `verdict-word ${trust.kind === "error" ? "error" : "pending"}`);
+      why.textContent = trust.kind === "loading" ? "正在讀取 AEMO 電價，讀到後才給執行或等待。"
+        : trust.kind === "error" ? `${trust.error}。沒有拿舊電價判斷；可以在下方公式的「充電段均價」「放電段均價」框裡輸入，做手動試算。`
+        : "按「重新讀取 AEMO 電價」，或在下方公式的均價框裡輸入，做手動試算。";
+    } else if (!decision || decision.error) {
       word.textContent = "無法判斷";
       word.setAttribute("class", "verdict-word error");
       why.textContent = decision?.error ?? "找不到「執行或等待」公式";
     } else {
       const go = decision.value !== 0;
-      word.textContent = go ? "執行" : "等待";
-      word.setAttribute("class", `verdict-word ${go ? "decision-go" : "decision-wait"}`);
       const parts = [];
       if (spread && !spread.error && standard) parts.push(`價差 ${plain_number(spread.value)} ${spread.value >= standard.value ? "≥" : "<"} 標準 ${plain_number(standard.value)} AUD/MWh`);
       if (cycle && !cycle.error) parts.push(`每循環淨收益 ${format_value(cycle.value, "currency")}`);
       if (daily && !daily.error) parts.push(`當日執行淨收益 ${format_value(daily.value, "currency")}`);
-      why.textContent = parts.join(" · ");
+      if (trust.kind === "live") {
+        word.textContent = go ? "執行" : "等待";
+        word.setAttribute("class", `verdict-word ${go ? "decision-go" : "decision-wait"}`);
+        why.textContent = parts.join(" · ");
+      } else {
+        word.textContent = trust.kind === "manual" ? "手動試算" : "資料可能過期";
+        word.setAttribute("class", "verdict-word trial");
+        const reason = trust.kind === "manual"
+          ? `你改了${trust.manual.map((key) => `「${label_of(key)}」`).join("、")}，不是當下建議`
+          : trust.age_minutes === null ? "無法判斷資料時間，請重新讀取" : `最後實際時段是 ${trust.age_minutes} 分鐘前（超過 ${STALE_MINUTES} 分鐘），請重新讀取`;
+        why.textContent = [reason, `試算結果：${go ? "執行" : "等待"}`, ...parts].join(" · ");
+      }
     }
   } else {
     const period = find_result(results, "period_revenue");
@@ -216,6 +235,11 @@ function render_verdict({ tab, results, variables }) {
     }
   }
   node.replaceChildren(word, why);
+}
+
+/** 目前預調度資料能不能當作當下建議（T8）。 */
+function current_trust() {
+  return data_trust({ status: state.data_status, series: state.series, value_overrides: state.value_overrides, now: Date.now() });
 }
 
 function render_data_bar(tab) {
@@ -238,6 +262,9 @@ function render_data_bar(tab) {
   else if (status?.cycle) {
     const { cycle, fetched_at, actual_periods } = status;
     bar.append(element("span", {}, `NSW1 · ${fetched_at.toLocaleTimeString("zh-TW", { hour12: false })} 取得 · 實際 ${actual_periods} 個＋預調度 ${cycle.forecast_periods} 個 30 分鐘時段 · 每段 ${cycle.periods_per_leg} 個時段 · 時間為 AEMO 時段結束時間`));
+    const trust = data_trust({ status, series: state.series, now: Date.now() });
+    if (trust.age_minutes !== null && trust.age_minutes !== undefined) bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `最後實際時段 ${trust.age_minutes} 分鐘前${trust.kind === "stale" ? "，可能過期" : ""}`));
+    else if (trust.kind === "stale") bar.append(element("span", { class: "error" }, "無法判斷資料時間，可能過期"));
   } else bar.append(element("span", {}, "尚未讀取，目前用預設均價。"));
   const button = element("button", { type: "button", class: "primary" }, status?.loading ? "讀取中…" : "重新讀取 AEMO 電價");
   if (status?.loading) button.setAttribute("disabled", "");
@@ -253,7 +280,9 @@ function render_chart({ tab, results }) {
     return;
   }
   const decision = find_result(results, "dispatch_decision");
-  const label = decision && !decision.error ? format_value(decision.value, "decision") : null;
+  const trust = current_trust();
+  const base_label = decision && !decision.error ? format_value(decision.value, "decision") : null;
+  const label = base_label && trust.kind !== "live" ? `試算：${base_label}` : base_label;
   const animate = view.decision !== null && label !== null && label !== view.decision;
   view.decision = label;
   view.width = container.clientWidth || null;
@@ -527,6 +556,7 @@ async function load_predispatch() {
   state.data_status = { ...state.data_status, loading: true };
   render_data_bar(current_tab());
   render_chart({ tab: current_tab(), results: [] });
+  render_verdict(evaluate_view());
   try {
     const payload = await fetch_report();
     const series = parse_price_series(payload);
@@ -541,6 +571,9 @@ async function load_predispatch() {
       discharge: leg_range(forecast, cycle.discharge_start, cycle.periods_per_leg),
     };
   } catch (error) {
+    // T8：讀取失敗時不保留上一次的電價與曲線，避免舊值被當成當下建議。
+    state.data = {};
+    state.series = null;
     state.data_status = { error: error.message };
   }
   render();
@@ -584,6 +617,13 @@ async function start() {
   });
   document.getElementById("share-settings")?.addEventListener("click", share_settings);
   window.addEventListener("hashchange", render);
+  // T8：頁面開著不動時，每分鐘重新判斷資料是否過期。
+  const trust_timer = setInterval(() => {
+    if (current_tab() !== "predispatch" || !state.data_status?.cycle) return;
+    render_data_bar("predispatch");
+    refresh();
+  }, TRUST_CHECK_MS);
+  trust_timer?.unref?.();
   const chart = document.getElementById("price-chart");
   if (chart && typeof ResizeObserver === "function") {
     new ResizeObserver(() => {
