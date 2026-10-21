@@ -24,12 +24,15 @@ export function review_history({ summary, registry, catalog, battery, start, end
   }
   const count = Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1;
   if (dates.size !== count) throw Error("摘要缺少日期，請重新產製");
+  const daily_revenue = (day, threshold) => day.cycles
+    .filter((cycle) => cycle.spread >= threshold && cycle.cycle_net_revenue > 0)
+    .reduce((total, cycle) => total + cycle.cycle_net_revenue, 0);
   const evaluate = (threshold) => {
     let revenue = 0, executed_days = 0, missed_revenue = 0; const missed_dates = [];
     for (const day of days) {
       const potential = day.cycles.filter((cycle) => cycle.spread >= 0 && cycle.cycle_net_revenue > 0);
       const kept = potential.filter((cycle) => cycle.spread >= threshold);
-      const net = kept.reduce((total, cycle) => total + cycle.cycle_net_revenue, 0);
+      const net = daily_revenue(day, threshold);
       const lost = potential.filter((cycle) => cycle.spread < threshold).reduce((total, cycle) => total + cycle.cycle_net_revenue, 0);
       revenue += net; missed_revenue += lost; if (kept.length) executed_days++; if (lost > 0) missed_dates.push(day.date);
     }
@@ -48,7 +51,9 @@ export function review_history({ summary, registry, catalog, battery, start, end
   const retained = scan.filter((row) => row.retention !== null && row.retention >= retention);
   const seasons = new Set(days.map((day) => Math.floor((Number(day.date.slice(5, 7)) % 12) / 3)));
   costs.sort((a, b) => a - b);
-  return { selected, scan, valid_days: days.length, excluded, range: retained.length ? [retained[0].standard, retained.at(-1).standard] : null,
+  return { selected, scan, valid_days: days.length, excluded,
+    daily_revenues: days.map((day) => ({ date: day.date, revenue: daily_revenue(day, standard) })),
+    range: retained.length ? [retained[0].standard, retained.at(-1).standard] : null,
     recommendation: baseline <= 0 || !days.length ? "無足夠正收益，不提供建議" : selected.retention >= retention ? "維持" : "建議下調",
     warnings: [...(days.length < 60 ? ["樣本不足（少於 60 個有效日）"] : []), ...(seasons.size === 1 ? ["季節限制（僅涵蓋一季）"] : [])],
     cost_reference: costs.length ? { min: costs[0], max: costs.at(-1), median: (costs[Math.floor((costs.length - 1) / 2)] + costs[Math.floor(costs.length / 2)]) / 2 } : null };

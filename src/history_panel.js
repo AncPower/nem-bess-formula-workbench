@@ -1,6 +1,8 @@
 import { review_history } from "./history_review.js";
+import { mount_quantiles } from "./history_quantiles.js";
 let pending;
-export function mount_history(bar, { registry, catalog, config }) {
+export function mount_history(bar, state, on_change) {
+  const { registry, catalog, config } = state;
   pending ??= fetch("data/daily_summary.json", { cache: "no-store" }).then(async (response) => {
     if (!response.ok) throw Error("尚無歷史摘要，請先執行本 repo 的下載與產製命令");
     const summary = await response.json();
@@ -19,8 +21,10 @@ export function mount_history(bar, { registry, catalog, config }) {
   const status = add("p", "讀取歷史摘要中…");
   status.setAttribute("class", "loading");
   pending.then((summary) => {
+    if (!Array.from(bar.children).includes(section)) return;
     status.removeAttribute("class");
     status.textContent = `NSW1 · NEM 時間 UTC+10 · 資料 ${summary.period.start_date} 至 ${summary.period.end_date} · 產生 ${summary.generated_at} · ${summary.sources.length} 個 AEMO 月檔`;
+    mount_quantiles(section, summary, state, on_change);
     const inputs = {};
     for (const [key, label, type, value] of [
       ["start", "起日", "date", summary.period.start_date], ["end", "迄日", "date", summary.period.end_date],
