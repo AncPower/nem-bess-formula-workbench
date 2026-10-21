@@ -1,8 +1,35 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { best_single_cycle, parse_report } from "../src/predispatch.js";
+import { fetch_report } from "../src/aemo_fetch.js";
 
 const row = (time, price, region = "NSW1", type = "FORECAST") => ({ REGIONID: region, PERIODTYPE: type, SETTLEMENTDATE: time, RRP: price });
+
+test("AEMO request and response body share a 15-second timeout with a useful error", async () => {
+  for (const body_pending of [false, true]) {
+    const controller = new AbortController();
+    const timeout = mock.method(AbortSignal, "timeout", (ms) => {
+      assert.equal(ms, 15000);
+      return controller.signal;
+    });
+    try {
+      const pending = () => new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(controller.signal.reason), { once: true }));
+      const task = fetch_report(async (_url, options) => {
+        assert.equal(options.signal, controller.signal);
+        return body_pending ? { ok: true, json: pending } : pending();
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      controller.abort(new DOMException("Timed out", "TimeoutError"));
+      await assert.rejects(task, /15 秒.*逾時/);
+    } finally { timeout.mock.restore(); }
+  }
+  const body = { "5MIN": [] };
+  assert.deepEqual(await fetch_report(async (_url, options) => {
+    assert.ok(options.signal instanceof AbortSignal);
+    return { ok: true, json: async () => body };
+  }), body);
+  await assert.rejects(fetch_report(async () => ({ ok: false, status: 503 })), /503/);
+});
 
 test("只取 NSW1 的預測列並排序", () => {
   const points = parse_report({ "5MIN": [row("2026-10-21T02:00:00", 5), row("2026-10-21T01:30:00", 3), row("2026-10-21T01:00:00", 9, "QLD1"), row("2026-10-21T00:30:00", 1, "NSW1", "ACTUAL")] });
