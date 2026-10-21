@@ -7,7 +7,7 @@
       "muted": { "$value": { "colorSpace": "srgb", "components": [0.31, 0.392, 0.459], "hex": "#4F6475" }, "$description": "也用於輸入框邊框（≥3:1）" }
     },
     "tide": {
-      "low": { "$value": { "colorSpace": "srgb", "components": [0.122, 0.435, 0.545], "hex": "#1F6F8B" }, "$description": "充電、預調度線；禁止用於 14px 以下文字" },
+      "low": { "$value": { "colorSpace": "srgb", "components": [0.122, 0.435, 0.545], "hex": "#1F6F8B" }, "$description": "充電、預調度線；禁止用於 16px 以下文字" },
       "high": { "$value": { "colorSpace": "srgb", "components": [0.612, 0.184, 0.333], "hex": "#9C2F55" }, "$description": "放電、錯誤" }
     },
     "surface": {
@@ -46,12 +46,12 @@
   },
   "fontSize": {
     "$type": "dimension",
-    "xs": { "$value": { "value": 12, "unit": "px" }, "$description": "只用於圖表刻度、來源代號、頁尾" },
-    "sm": { "$value": { "value": 14, "unit": "px" } },
-    "md": { "$value": { "value": 16, "unit": "px" } },
-    "lg": { "$value": { "value": 20, "unit": "px" } },
-    "xl": { "$value": { "value": 28, "unit": "px" } },
-    "hero": { "$value": { "value": 56, "unit": "px" } }
+    "xs": { "$value": { "value": 13, "unit": "px" }, "$description": "只用於圖表刻度、頁尾、窄螢幕的日期標籤" },
+    "sm": { "$value": { "value": 16, "unit": "px" } },
+    "md": { "$value": { "value": 18, "unit": "px" }, "$description": "內文預設字級" },
+    "lg": { "$value": { "value": 22, "unit": "px" } },
+    "xl": { "$value": { "value": 30, "unit": "px" } },
+    "hero": { "$value": { "value": 60, "unit": "px" } }
   },
   "space": {
     "$type": "dimension",
