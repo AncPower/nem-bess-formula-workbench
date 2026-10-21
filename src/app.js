@@ -13,12 +13,14 @@ import { compute } from "./engine.js";
 import { compute_day } from "./day.js";
 import { mount_history } from "./history_panel.js";
 import { check_registry } from "./registry_check.js";
-import { best_single_cycle, fetch_report, parse_report } from "./predispatch.js";
+import { best_single_cycle, parse_report } from "./predispatch.js";
+import { fetch_report } from "./aemo_fetch.js";
 import { build_chart_model, leg_range, parse_price_series, three_day_window } from "./price_series.js";
 import { render_dispatch_chart } from "./price_chart.js";
 import { GROUPS, SHORT_LABELS, TERMS, group_of, short_label } from "./formula_help.js";
 import { FUNCTION_TEXT, from_chinese, to_chinese, to_parts } from "./formula_text.js";
 import { STALE_MINUTES, data_trust } from "./data_trust.js";
+import { money, price_input } from "./format.js";
 import { apply_share, compare_rows, custom_key, decode_share, encode_share, read_share, share_snapshot, share_url } from "./share_state.js";
 
 const TABS = ["predispatch", "scenario"];
@@ -55,9 +57,9 @@ function current_tab() {
 
 function format_value(value, format, unit) {
   if (format === "decision") return value !== 0 ? "執行" : "等待";
-  const digits = format === "currency" ? 0 : 2;
-  const text = value.toLocaleString("zh-TW", { maximumFractionDigits: digits, minimumFractionDigits: 0 });
-  return format === "currency" ? `A$ ${text}` : `${text}${unit ? ` ${unit}` : ""}`;
+  if (format === "currency") return money(value);
+  const text = value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
+  return `${text}${unit ? ` ${unit}` : ""}`;
 }
 const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
 
@@ -261,9 +263,13 @@ function render_data_bar(tab) {
   else if (status?.error) bar.append(element("span", { class: "error" }, `讀取失敗：${status.error}。可以直接在下方公式的「充電段均價」「放電段均價」框裡輸入。`));
   else if (status?.cycle) {
     const { cycle, fetched_at, actual_periods } = status;
-    bar.append(element("span", {}, `NSW1 · ${fetched_at.toLocaleTimeString("zh-TW", { hour12: false })} 取得 · 實際 ${actual_periods} 個＋預調度 ${cycle.forecast_periods} 個 30 分鐘時段 · 每段 ${cycle.periods_per_leg} 個時段 · 時間為 AEMO 時段結束時間`));
+    bar.append(element("span", {}, `NSW1 · ${fetched_at.toLocaleTimeString("zh-TW", { hour12: false })} 取得 · 實際 ${state.series.actual_source.count} 筆 5 分鐘資料 → ${actual_periods} 個完整 30 分鐘時段＋預調度 ${cycle.forecast_periods} 個 30 分鐘時段 · 每段 ${cycle.periods_per_leg} 個時段 · 時間為 AEMO 時段結束時間`));
     const trust = data_trust({ status, series: state.series, now: Date.now() });
-    if (trust.age_minutes !== null && trust.age_minutes !== undefined) bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `最後實際時段 ${trust.age_minutes} 分鐘前${trust.kind === "stale" ? "，可能過期" : ""}`));
+    if (trust.at !== null && trust.at !== undefined) {
+      const ended = new Date(trust.at + 10 * 60 * 60000).toISOString().slice(0, 16).replace("T", " ");
+      const name = state.series.actual_source.count ? "最後實際時段" : "資料參考時段";
+      bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `${name}結束於 NEM ${ended}（UTC+10）${trust.kind === "stale" ? "，可能過期" : ""}`));
+    }
     else if (trust.kind === "stale") bar.append(element("span", { class: "error" }, "無法判斷資料時間，可能過期"));
   } else bar.append(element("span", {}, "尚未讀取，目前用預設均價。"));
   const button = element("button", { type: "button", class: "primary" }, status?.loading ? "讀取中…" : "重新讀取 AEMO 電價");
@@ -289,7 +295,9 @@ function render_chart({ tab, results }) {
   const timeline = three_day_window(state.series);
   const model = build_chart_model(state.series, state.data.predispatch ?? null, timeline?.times ?? null);
   render_dispatch_chart(container, model, { decision: label, power_mw: state.config.battery?.power_mw ?? 0, animate, days: timeline?.days ?? null });
-  if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有實際電價時段，只畫出預調度電價。"));
+  const source = state.series.actual_source;
+  if (source?.count) container.append(element("p", { class: "note" }, `實際電價來源範圍（5 分鐘時段結束，NEM UTC+10）：${source.first.replace("T", " ")} 至 ${source.last.replace("T", " ")}；僅畫出每段六筆齊全的 30 分鐘均價，範圍外或缺筆處留空。`));
+  if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有完整的實際電價 30 分鐘時段，只畫出預調度電價。"));
 }
 
 /** 改了哪些設定：數值列出預設 → 你的；改寫的公式列出中文式子；啟用中的歷史分位數列出條件。 */
@@ -377,6 +385,11 @@ async function share_settings() {
 }
 
 function paint_result(node, formula, result) {
+  if (formula.id === "dispatch_decision" && current_tab() === "predispatch" && current_trust().kind === "loading") {
+    node.setAttribute("class", "result");
+    node.textContent = "讀取中";
+    return;
+  }
   if (result.error) {
     node.setAttribute("class", "result error");
     node.textContent = result.error;
@@ -416,7 +429,10 @@ function name_chip(name, formula_id, { variables, results }) {
   const id = `var-${formula_id}-${name}`;
   const chip = element("span", { class: `chip cat-${category}${variable?.origin === "user" ? " overridden" : ""}` });
   chip.append(element("label", { for: id, class: "chip-name" }, label));
-  const input = element("input", { id, type: "number", step: "any", inputmode: "decimal", value: history_error ? "" : String(variable?.value ?? 0), "data-key": name, "aria-describedby": tip_id });
+  const round_input = name === "charge_price" || name === "discharge_price" || name === "daily_revenue";
+  const display = round_input ? price_input(variable?.value ?? 0) : String(variable?.value ?? 0);
+  const input = element("input", { id, type: "number", step: "any", inputmode: "decimal", value: history_error ? "" : display, "data-key": name, "aria-describedby": tip_id });
+  let dirty = false;
   const size = () => input.setAttribute("style", `--chars: ${Math.min(10, Math.max(3, String(input.value).length))}`);
   size();
   if (variable?.origin === "aggregate") {
@@ -426,7 +442,10 @@ function name_chip(name, formula_id, { variables, results }) {
   }
   if (!view.inputs.has(name)) view.inputs.set(name, []);
   view.inputs.get(name).push(input);
-  const apply = () => {
+  const apply = (editing = false) => {
+    dirty ||= editing;
+    // 未輸入就離開欄位，不把顯示用的兩位小數寫回原始精度。
+    if (round_input && !dirty && input.value === display) return;
     if (name === "daily_revenue" && state.scenario_history) state.scenario_history.active = false;
     const value = Number(input.value);
     if (input.value === "" || !Number.isFinite(value)) delete state.value_overrides[name];
@@ -434,7 +453,7 @@ function name_chip(name, formula_id, { variables, results }) {
     for (const twin of view.inputs.get(name)) if (twin !== input) twin.value = input.value;
     size();
   };
-  input.addEventListener("input", () => { apply(); schedule_preview(); });
+  input.addEventListener("input", () => { apply(true); schedule_preview(); });
   input.addEventListener("change", () => { apply(); render(); });
   chip.append(input);
   if (variable?.origin === "user") chip.append(element("span", { class: "changed", "aria-label": "已改" }, "•"));
@@ -555,8 +574,7 @@ function insert_at_cursor(textarea, text) {
 async function load_predispatch() {
   state.data_status = { ...state.data_status, loading: true };
   render_data_bar(current_tab());
-  render_chart({ tab: current_tab(), results: [] });
-  render_verdict(evaluate_view());
+  refresh();
   try {
     const payload = await fetch_report();
     const series = parse_price_series(payload);

@@ -1,4 +1,5 @@
 import { review_history } from "./history_review.js";
+import { money } from "./format.js";
 
 /** Percentiles use ascending values and linear interpolation at (n - 1) * p. */
 export function revenue_quantiles(review) {
@@ -51,7 +52,7 @@ export function mount_quantiles(parent, summary, state, on_change = () => {}) {
       settings.daily_revenue = values[settings.quantile];
       settings.error = null;
       status.setAttribute("class", "note");
-      status.textContent = `${settings.active ? "已使用歷史分位數" : "目前保留手動／預設值，按鈕才會帶入"} · ${settings.start} 至 ${settings.end} · 有效 ${result.valid_days} 天 · ${Object.entries(values).map(([key, value]) => `${key.toUpperCase()} A$ ${value.toFixed(2)}/天`).join(" · ")}。排除日期：${result.excluded.map((day) => `${day.date}（${day.reason}）`).join("、") || "無"}。${result.warnings.join("；")}`;
+      status.textContent = `${settings.active ? "已使用歷史分位數" : "目前保留手動／預設值，按鈕才會帶入"} · ${settings.start} 至 ${settings.end} · 有效 ${result.valid_days} 天 · ${Object.entries(values).map(([key, value]) => `${key.toUpperCase()} ${money(value, { digits: 2 })}/天`).join(" · ")}。排除日期：${result.excluded.map((day) => `${day.date}（${day.reason}）`).join("、") || "無"}。${result.warnings.join("；")}`;
       apply.disabled = false;
     } catch (error) {
       settings.daily_revenue = undefined;

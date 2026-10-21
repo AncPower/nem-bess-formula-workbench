@@ -60,6 +60,7 @@ test("P8 controls preserve manual input until explicit apply, persist selection 
     const apply = nodes.find((node) => node.tag === "button");
     assert.equal(state.value_overrides.daily_revenue, 123);
     assert.equal(calls, 0);
+    assert.ok(nodes.some((node) => /P50 A\$ 1,300\.00\/天/.test(node.textContent)), "分位數文字也用千分位");
     input("收益參考價差標準 AUD/MWh").value = "100";
     input("收益參考價差標準 AUD/MWh").listeners.change();
     assert.equal(state.value_overrides.daily_revenue, 123);

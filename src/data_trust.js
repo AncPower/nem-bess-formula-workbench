@@ -17,7 +17,8 @@ export function market_time_ms(text) {
 
 /** 資料時間：最後一個實際時段結束；沒有實際時段時，用第一個預測時段結束往前推一個時段。 */
 export function data_time(series) {
-  const last = series?.actual?.at(-1)?.settlement_date;
+  // 原始最新 5 分鐘資料用於時效，不能以最後一個完整聚合桶代替。
+  const last = series?.actual_source?.last ?? series?.actual?.at(-1)?.settlement_date;
   if (last) return market_time_ms(last);
   const first = series?.forecast?.[0]?.settlement_date;
   const ms = first ? market_time_ms(first) : null;

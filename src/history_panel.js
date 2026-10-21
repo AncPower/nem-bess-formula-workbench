@@ -1,5 +1,6 @@
 import { review_history } from "./history_review.js";
 import { mount_quantiles } from "./history_quantiles.js";
+import { money } from "./format.js";
 let pending;
 export function mount_history(bar, state, on_change) {
   const { registry, catalog, config } = state;
@@ -43,15 +44,15 @@ export function mount_history(bar, state, on_change) {
         const values = Object.fromEntries(Object.entries(inputs).map(([key, input]) => { if (!input.value) throw Error("試算欄位不得留空"); return [key, ["start", "end"].includes(key) ? input.value : Number(input.value)]; }));
         const result = review_history({ summary, registry, catalog, battery: config.battery, ...values });
         add("h4", `試算：${result.recommendation}`, output);
-        add("p", `有效 ${result.valid_days} 天；執行 ${result.selected.executed_days} 天；淨收益 A$ ${result.selected.revenue.toFixed(2)}；保留率 ${result.selected.retention === null ? "無法計算" : `${(100 * result.selected.retention).toFixed(2)}%`}；保留範圍 ${result.range ? result.range.join(" 至 ") : "無"} AUD/MWh`, output);
-        add("p", `錯失 ${result.selected.missed_days} 天／A$ ${result.selected.missed_revenue.toFixed(2)}；日期：${result.selected.missed_dates.join("、") || "無"}`, output);
+        add("p", `有效 ${result.valid_days} 天；執行 ${result.selected.executed_days} 天；淨收益 ${money(result.selected.revenue, { digits: 2 })}；保留率 ${result.selected.retention === null ? "無法計算" : `${(100 * result.selected.retention).toFixed(2)}%`}；保留範圍 ${result.range ? result.range.join(" 至 ") : "無"} AUD/MWh`, output);
+        add("p", `錯失 ${result.selected.missed_days} 天／${money(result.selected.missed_revenue, { digits: 2 })}；日期：${result.selected.missed_dates.join("、") || "無"}`, output);
         add("p", `排除日期：${result.excluded.map((day) => `${day.date}（${day.reason}）`).join("、") || "無"}。${result.warnings.join("；")}`, output);
         add("p", `損益兩平價差（僅成本參考）：${result.cost_reference ? `中位數 ${result.cost_reference.median.toFixed(2)}，範圍 ${result.cost_reference.min.toFixed(2)} 至 ${result.cost_reference.max.toFixed(2)} AUD/MWh` : "無可用循環"}。試算不修改設定；未排除事件日。`, output);
         const table = add("table", "", output), header = add("tr", "", table);
         for (const text of ["標準", "執行天數", "淨收益 AUD", "錯失天數", "錯失收益 AUD", "保留率"]) add("th", text, header);
         for (const row of result.scan) {
           const tr = add("tr", "", table);
-          for (const text of [row.standard, row.executed_days, row.revenue.toFixed(2), row.missed_days, row.missed_revenue.toFixed(2), row.retention === null ? "N/A" : `${(row.retention * 100).toFixed(2)}%`]) add("td", String(text), tr);
+          for (const text of [row.standard, row.executed_days, money(row.revenue, { digits: 2, symbol: false }), row.missed_days, money(row.missed_revenue, { digits: 2, symbol: false }), row.retention === null ? "N/A" : `${(row.retention * 100).toFixed(2)}%`]) add("td", String(text), tr);
         }
       } catch (error) { add("p", error.message, output); }
     };
