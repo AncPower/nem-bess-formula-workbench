@@ -47,6 +47,7 @@ test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取�
     assert.equal(input("charge_price").value, "35", "用的是讀到的電價，不是預設值");
     assert.match(word().attributes.class, /decision-go/);
     assert.match(bar(), /最後實際時段結束於 NEM 2026-10-20 23:30/);
+    assert.match(bar(), /（UTC\+10），即時資料（35 分鐘內）/, "V1-3a：即時狀態要明示，不能只靠其他標示沒出現");
     assert.doesNotMatch(bar(), /最後實際時段 0 分鐘前/);
     assert.ok(chart().some((node) => node.tag === "li" && node.textContent.endsWith("+5 MW · 執行")));
 
@@ -83,21 +84,25 @@ test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取�
 
     mock.timers.tick(25 * 60 * 1000);
     assert.equal(word().textContent, "執行", "35 分鐘（含）以內仍是即時");
+    assert.match(bar(), /即時資料（35 分鐘內）/, "每分鐘檢查後仍標即時");
     mock.timers.tick(1 * 60 * 1000);
     assert.equal(word().textContent, "資料可能過期", "頁面開著不動，超過 35 分鐘自動轉成可能過期");
     assert.match(why(), /^最後實際時段是 36 分鐘前（超過 35 分鐘），請重新讀取 · 試算結果：執行/);
     assert.match(bar(), /最後實際時段結束於 NEM 2026-10-20 23:30（UTC\+10），可能過期/);
+    assert.doesNotMatch(bar(), /即時資料/, "過期後不再標即時");
 
     let fail;
     respond = () => new Promise((_, reject) => { fail = reject; });
     reload();
     assert.equal(word().textContent, "讀取中", "讀取中不給判斷");
     assert.equal(card_word(), "讀取中", "公式卡片不能同時顯示執行");
+    assert.doesNotMatch(bar(), /即時資料/, "讀取中不標即時");
     await flush();
     fail(new Error("AEMO API 回應 503"));
     await flush(); await flush();
     assert.equal(word().textContent, "讀取失敗");
     assert.match(why(), /^AEMO API 回應 503。沒有拿舊電價判斷/);
+    assert.doesNotMatch(bar(), /即時資料/, "讀取失敗不標即時");
     assert.ok(chart().some((node) => /^讀到 AEMO 電價後/.test(node.textContent)), "讀取失敗清掉上一次的曲線");
     assert.equal(input("charge_price").value, "40", "讀取失敗清掉上一次的均價（35），回到預設");
     assert.equal(input("discharge_price").value, "180", "讀取失敗清掉上一次的均價（190），回到預設");

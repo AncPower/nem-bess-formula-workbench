@@ -291,6 +291,9 @@ function current_trust() {
   return data_trust({ status: state.data_status, series: state.series, value_overrides: state.value_overrides, now: Date.now() });
 }
 
+/** 資料列的時效後綴：可能過期或即時都明示，不靠「其他標示沒出現」判斷（V1-3a）。 */
+const freshness_suffix = (kind) => (kind === "stale" ? "，可能過期" : kind === "live" ? `，即時資料（${STALE_MINUTES} 分鐘內）` : "");
+
 function render_data_bar(tab) {
   const bar = document.getElementById("data-bar");
   const history = document.getElementById("history-panel");
@@ -315,7 +318,7 @@ function render_data_bar(tab) {
     if (trust.at !== null && trust.at !== undefined) {
       const ended = new Date(trust.at + 10 * 60 * 60000).toISOString().slice(0, 16).replace("T", " ");
       const name = state.series.actual_source.count ? "最後實際時段" : "資料參考時段";
-      bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `${name}結束於 NEM ${ended}（UTC+10）${trust.kind === "stale" ? "，可能過期" : ""}`));
+      bar.append(element("span", trust.kind === "stale" ? { class: "error" } : {}, `${name}結束於 NEM ${ended}（UTC+10）${freshness_suffix(trust.kind)}`));
     }
     else if (trust.kind === "stale") bar.append(element("span", { class: "error" }, "無法判斷資料時間，可能過期"));
   } else bar.append(element("span", {}, "尚未讀取，目前用預設均價。"));
