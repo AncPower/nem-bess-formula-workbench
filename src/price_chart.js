@@ -1,14 +1,16 @@
 /**
  * 電價與充放電排程圖（SVG）：共用一條時間軸（x），左 y 軸是電價（AUD/MWh），右 y 軸是電池功率（MW，放電為正、充電為負）。
- * 實際電價實線、預調度電價虛線、充放電功率長條、實際與預調度分界線；時間刻度上下兩排是 NEM 市場時間與台北時間。
- * 依容器實際寬度繪製（不縮放字級），刻度間距不足時自動抽稀，避免文字重疊。只用 DOM API，不載入圖表套件。
+ * 時間軸固定為昨天、今天、明天三個交易日，每天 48 個 30 分鐘時段等距排列；實際電價實線、預調度電價虛線、充放電功率長條。
+ * 時間刻度上下兩排是 NEM 市場時間與台北時間；依容器實際寬度繪製（不縮放字級），刻度間距不足時自動抽稀，避免文字重疊。
+ * 游標滑過顯示垂直線與該時段的時間、電價；拖曳選取一段時間，暫時框框顯示該段的均價。只用 DOM API，不載入圖表套件。
  */
 
-import { date_time_label, time_label } from "./price_series.js";
+import { time_label } from "./price_series.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const HEIGHT = 280;
-const PAD = { top: 28, right: 52, bottom: 48, left: 56 };
+const PAD = { top: 40, right: 52, bottom: 48, left: 56 };
+const SLOT_MS = 30 * 60 * 1000;
 const MIN_LABEL_GAP = 64;
 const DEFAULT_WIDTH = 960;
 
@@ -26,6 +28,9 @@ const html = (tag, attributes = {}, text) => {
 };
 
 const money = (value) => `A$ ${Math.round(value).toLocaleString("zh-TW")}`;
+const ms_of = (settlement_date) => Date.parse(`${settlement_date}Z`);
+const stamp = (ms) => new Date(ms).toISOString().slice(5, 16).replace("-", "/").replace("T", " ");
+const clock = (ms) => new Date(ms).toISOString().slice(11, 16);
 
 /** 「14:30」→ 台北時間「12:30」（市場時間 − 2 小時）。 */
 export function taipei_label(market_time) {
@@ -62,12 +67,57 @@ export function leg_text(kind, leg, power_mw, decision) {
   return `${name} ${range}（台北 ${taipei}）· 均價 ${money(leg.average)}/MWh · ${power}${kind === "discharge" && decision ? ` · ${decision}` : ""}`;
 }
 
+/** 第 index 個時段的開始與結束（AEMO 標記是結束時間）。 */
+function slot_span(model, index) {
+  const end = ms_of(model.rows[index].time);
+  return { start: end - SLOT_MS, end };
+}
+
+/** 一段時間的 NEM 與台北時間標籤，例如「10/21 02:00–06:00（台北 10/21 00:00–04:00）」。 */
+export function span_label(start, end) {
+  const same_day = (a, b) => stamp(a).slice(0, 5) === stamp(b).slice(0, 5);
+  const text = (a, b) => `${stamp(a)}–${same_day(a, b) ? clock(b) : stamp(b)}`;
+  return `${text(start, end)}（台北 ${text(start - 2 * 60 * 60 * 1000, end - 2 * 60 * 60 * 1000)}）`;
+}
+
+/** 游標所在的時段：時間、實際與預調度電價、充放電動作。 */
+export function slot_detail(model, index, power_mw = 0, decision = null) {
+  const row = model.rows[index];
+  const { start, end } = slot_span(model, index);
+  const inside = (leg) => leg && index >= leg.from && index <= leg.to;
+  const lines = [];
+  lines.push(row.actual === null ? "實際：無資料" : `實際 ${money(row.actual)}/MWh`);
+  lines.push(row.forecast === null ? "預調度：無資料" : `預調度 ${money(row.forecast)}/MWh`);
+  lines.push(inside(model.charge) ? `充電 −${power_mw} MW` : inside(model.discharge) ? `放電 +${power_mw} MW${decision ? `（${decision}）` : ""}` : "不動作");
+  return { title: `NEM ${span_label(start, end)}`, lines };
+}
+
+/** 選取的一段時間：時段數與實際、預調度均價（只平均有資料的時段）。 */
+export function range_summary(model, from, to) {
+  const low = Math.min(from, to);
+  const high = Math.max(from, to);
+  const rows = model.rows.slice(low, high + 1);
+  const average = (kind, name) => {
+    const values = rows.map((row) => row[kind]).filter((value) => value !== null);
+    return values.length ? `${name}均價 ${money(values.reduce((sum, value) => sum + value, 0) / values.length)}/MWh（${values.length} 個時段）` : `${name}：無資料`;
+  };
+  const start = slot_span(model, low).start;
+  const end = slot_span(model, high).end;
+  return { title: `NEM ${span_label(start, end)}· ${rows.length} 個時段（${rows.length / 2} 小時）`, lines: [average("actual", "實際"), average("forecast", "預調度")] };
+}
+
+/** 游標的 x（SVG 座標）→ 時段編號。 */
+export function index_at(x, full_width, count) {
+  const step = (full_width - PAD.left - PAD.right) / count;
+  return Math.max(0, Math.min(count - 1, Math.floor((x - PAD.left) / step)));
+}
+
 /**
  * @param {HTMLElement} container
  * @param {ReturnType<import("./price_series.js").build_chart_model>} model
- * @param {{decision?: string|null, power_mw?: number, animate?: boolean, width?: number}} options
+ * @param {{decision?: string|null, power_mw?: number, animate?: boolean, width?: number, days?: {date: string, name: string}[]}} options
  */
-export function render_dispatch_chart(container, model, { decision = null, power_mw = 0, animate = false, width } = {}) {
+export function render_dispatch_chart(container, model, { decision = null, power_mw = 0, animate = false, width, days = null } = {}) {
   container.replaceChildren();
   const legend = html("div", { class: "chart-legend" });
   for (const [kind, text] of [["actual", "實際電價（左軸）"], ["forecast", "預調度電價（左軸）"], ["charge", "充電功率（右軸）"], ["discharge", "放電功率（右軸）"]]) {
@@ -81,6 +131,7 @@ export function render_dispatch_chart(container, model, { decision = null, power
   const inner_height = HEIGHT - PAD.top - PAD.bottom;
   const step = inner_width / model.rows.length;
   const x = (index) => PAD.left + index * step + step / 2;
+  const edge = (index) => PAD.left + index * step;
 
   const ticks = nice_ticks(model.min, model.max);
   const low = Math.min(ticks[0], model.min);
@@ -92,7 +143,7 @@ export function render_dispatch_chart(container, model, { decision = null, power
   const summary = [leg_text("charge", model.charge, power_mw, decision), leg_text("discharge", model.discharge, power_mw, decision)].filter(Boolean);
   const chart = svg("svg", {
     width: full_width, height: HEIGHT, viewBox: `0 0 ${full_width} ${HEIGHT}`, role: "group",
-    "aria-label": `NSW1 30 分鐘電價與充放電排程。${summary.join("；") || "尚未選出充放電時段"}`,
+    "aria-label": `NSW1 30 分鐘電價與充放電排程${days ? `（${days.map((day) => `${day.name} ${day.date.slice(5).replace("-", "/")}`).join("、")}）` : ""}。${summary.join("；") || "尚未選出充放電時段"}`,
     class: `price-chart${animate ? " fill" : ""}`,
   });
 
@@ -103,24 +154,27 @@ export function render_dispatch_chart(container, model, { decision = null, power
   for (const mw of power_mw > 0 ? [-power_mw, 0, power_mw] : [0]) {
     chart.append(svg("text", { x: full_width - PAD.right + 8, y: y_mw(mw) + 4, "text-anchor": "start", class: "tick tick-mw" }, mw > 0 ? `+${mw}` : mw < 0 ? `−${-mw}` : "0"));
   }
-  chart.append(svg("text", { x: 4, y: 14, class: "axis-title" }, "AUD/MWh"));
-  chart.append(svg("text", { x: full_width - 4, y: 14, "text-anchor": "end", class: "axis-title" }, "MW"));
+  chart.append(svg("text", { x: 4, y: 16, class: "axis-title" }, "AUD/MWh"));
+  chart.append(svg("text", { x: full_width - 4, y: 16, "text-anchor": "end", class: "axis-title" }, "MW"));
+
+  if (days) {
+    const per_day = model.rows.length / days.length;
+    days.forEach((day, index) => {
+      if (index > 0) chart.append(svg("line", { x1: edge(index * per_day), x2: edge(index * per_day), y1: PAD.top - 16, y2: HEIGHT - PAD.bottom, class: "day-divider" }));
+      chart.append(svg("text", { x: edge(index * per_day + per_day / 2), y: PAD.top - 12, "text-anchor": "middle", class: "day-label" }, `${day.name} ${day.date.slice(5).replace("-", "/")}`));
+    });
+  }
 
   for (const [kind, leg, sign] of [["charge", model.charge, -1], ["discharge", model.discharge, 1]]) {
     if (!leg || leg.from < 0 || leg.to < 0 || !(power_mw > 0)) continue;
     for (let index = leg.from; index <= leg.to; index += 1) {
       const top = sign > 0 ? y_mw(power_mw) : y_mw(0);
-      chart.append(svg("rect", { x: PAD.left + index * step + step * 0.1, y: top, width: step * 0.8, height: Math.abs(y_mw(0) - y_mw(power_mw)), class: `band-${kind}` }));
+      chart.append(svg("rect", { x: edge(index) + step * 0.1, y: top, width: step * 0.8, height: Math.abs(y_mw(0) - y_mw(power_mw)), class: `band-${kind}` }));
     }
-    const left = PAD.left + leg.from * step;
-    chart.append(svg("line", { x1: left, x2: left + (leg.to - leg.from + 1) * step, y1: y(leg.average), y2: y(leg.average), class: `average-${kind}` }));
+    chart.append(svg("line", { x1: edge(leg.from), x2: edge(leg.to + 1), y1: y(leg.average), y2: y(leg.average), class: `average-${kind}` }));
   }
 
-  if (model.boundary !== null) {
-    const boundary_x = PAD.left + model.boundary * step;
-    chart.append(svg("line", { x1: boundary_x, x2: boundary_x, y1: PAD.top, y2: HEIGHT - PAD.bottom, class: "boundary" }));
-    chart.append(svg("text", { x: boundary_x + 4, y: PAD.top + 12, class: "boundary-label" }, "預調度 →"));
-  }
+  if (model.boundary !== null) chart.append(svg("line", { x1: edge(model.boundary), x2: edge(model.boundary), y1: PAD.top, y2: HEIGHT - PAD.bottom, class: "boundary" }));
 
   for (const kind of ["actual", "forecast"]) {
     const segments = [];
@@ -138,37 +192,108 @@ export function render_dispatch_chart(container, model, { decision = null, power
     }
   }
 
+  // 時間刻度標在時段邊界，顯示該時段的開始時間（00:00、06:00…），兩排分別是 NEM 與台北時間。
   const every = label_every(step);
   chart.append(svg("text", { x: PAD.left - 8, y: HEIGHT - 26, "text-anchor": "end", class: "tick tick-zone" }, "NEM"));
   chart.append(svg("text", { x: PAD.left - 8, y: HEIGHT - 8, "text-anchor": "end", class: "tick tick-zone" }, "台北"));
+  for (let index = 0; index < model.rows.length; index += every) {
+    const start = slot_span(model, index).start;
+    chart.append(svg("text", { x: edge(index), y: HEIGHT - 26, "text-anchor": index === 0 ? "start" : "middle", class: "tick" }, clock(start)));
+    chart.append(svg("text", { x: edge(index), y: HEIGHT - 8, "text-anchor": index === 0 ? "start" : "middle", class: "tick tick-taipei" }, clock(start - 2 * 60 * 60 * 1000)));
+  }
+
+  // 游標與選取
+  const selection = svg("rect", { x: 0, y: PAD.top, width: 0, height: inner_height, class: "selection", visibility: "hidden" });
+  const cursor = svg("line", { x1: 0, x2: 0, y1: PAD.top, y2: HEIGHT - PAD.bottom, class: "cursor", visibility: "hidden" });
+  chart.append(selection, cursor);
+  const stage = html("div", { class: "chart-stage" });
+  const tip = html("div", { class: "chart-tip", role: "status", "aria-live": "polite", hidden: "" });
+  const state = { anchor: null, dragging: false, range: null };
+
+  const scale = () => {
+    const rect = chart.getBoundingClientRect?.();
+    return rect && rect.width ? { left: rect.left, width: rect.width, ratio: rect.width / full_width } : { left: 0, width: full_width, ratio: 1 };
+  };
+  const show_tip = (content, at_x) => {
+    const { width: css_width, ratio } = scale();
+    const css_x = at_x * ratio;
+    const title = html("strong", {}, content.title);
+    tip.replaceChildren(title, ...content.lines.map((line) => html("span", {}, line)));
+    tip.setAttribute("style", css_x > css_width / 2 ? `right: ${Math.round(css_width - css_x + 8)}px` : `left: ${Math.round(css_x + 8)}px`);
+    tip.removeAttribute("hidden");
+  };
+  const hide = () => {
+    cursor.setAttribute("visibility", "hidden");
+    selection.setAttribute("visibility", "hidden");
+    tip.setAttribute("hidden", "");
+    state.range = null;
+  };
+  const point = (index) => {
+    cursor.setAttribute("x1", x(index));
+    cursor.setAttribute("x2", x(index));
+    cursor.setAttribute("visibility", "visible");
+    if (state.range && state.range.from !== state.range.to) {
+      selection.setAttribute("x", edge(state.range.from));
+      selection.setAttribute("width", edge(state.range.to + 1) - edge(state.range.from));
+      selection.setAttribute("visibility", "visible");
+      show_tip(range_summary(model, state.range.from, state.range.to), edge(state.range.to + 1));
+    } else {
+      selection.setAttribute("visibility", "hidden");
+      show_tip(slot_detail(model, index, power_mw, decision), x(index));
+    }
+  };
+  const index_from = (event) => {
+    const { left, ratio } = scale();
+    return index_at((event.clientX - left) / ratio, full_width, model.rows.length);
+  };
+  const extend = (index) => { state.range = { from: Math.min(state.anchor, index), to: Math.max(state.anchor, index) }; };
+
+  chart.addEventListener("pointerdown", (event) => {
+    const index = index_from(event);
+    state.anchor = index;
+    state.dragging = true;
+    state.range = { from: index, to: index };
+    chart.setPointerCapture?.(event.pointerId);
+    point(index);
+  });
+  chart.addEventListener("pointermove", (event) => {
+    const index = index_from(event);
+    if (state.dragging) extend(index);
+    point(index);
+  });
+  chart.addEventListener("pointerup", (event) => {
+    state.dragging = false;
+    if (state.range && state.range.from === state.range.to) state.range = null;
+    point(index_from(event));
+  });
+  chart.addEventListener("pointerleave", () => { if (!state.dragging) hide(); });
+  chart.addEventListener("pointercancel", () => { state.dragging = false; hide(); });
+
+  // 鍵盤：方向鍵逐格移動，Shift＋方向鍵選取一段時間
   const hits = [];
   model.rows.forEach((row, index) => {
-    const time = time_label(row.time);
-    if (index % every === 0) {
-      chart.append(svg("text", { x: x(index), y: HEIGHT - 26, "text-anchor": "middle", class: "tick" }, time));
-      chart.append(svg("text", { x: x(index), y: HEIGHT - 8, "text-anchor": "middle", class: "tick tick-taipei" }, taipei_label(time)));
-    }
-    const inside = (leg) => leg && index >= leg.from && index <= leg.to;
-    const action = inside(model.charge) ? `充電 −${power_mw} MW` : inside(model.discharge) ? `放電 +${power_mw} MW${decision ? `（${decision}）` : ""}` : "不動作";
-    const parts = [`NEM ${date_time_label(row.time)}（台北 ${taipei_label(time)}）`];
-    if (row.actual !== null) parts.push(`實際 ${money(row.actual)}/MWh`);
-    if (row.forecast !== null) parts.push(`預調度 ${money(row.forecast)}/MWh`);
-    parts.push(action);
-    const hit = svg("rect", { x: PAD.left + index * step, y: PAD.top, width: step, height: inner_height, class: "hit", tabindex: index === 0 ? "0" : "-1", role: "img", "aria-label": parts.join(" · ") });
-    hit.append(svg("title", {}, parts.join(" · ")));
+    const detail = slot_detail(model, index, power_mw, decision);
+    const hit = svg("rect", { x: edge(index), y: PAD.top, width: step, height: inner_height, class: "hit", tabindex: index === 0 ? "0" : "-1", role: "img", "aria-label": [detail.title, ...detail.lines].join(" · ") });
+    hit.addEventListener("focus", () => { if (state.anchor === null) state.anchor = index; point(index); });
+    hit.addEventListener("blur", () => { if (!state.range) hide(); });
     hit.addEventListener("keydown", (event) => {
       const delta = { ArrowRight: 1, ArrowLeft: -1, Home: -index, End: hits.length - 1 - index }[event.key];
+      if (event.key === "Escape") { state.anchor = index; hide(); return; }
       if (delta === undefined) return;
       event.preventDefault?.();
-      const next = hits[Math.max(0, Math.min(hits.length - 1, index + delta))];
+      const target = Math.max(0, Math.min(hits.length - 1, index + delta));
+      if (event.shiftKey) extend(target);
+      else { state.anchor = target; state.range = null; }
       hit.setAttribute("tabindex", "-1");
-      next.setAttribute("tabindex", "0");
-      next.focus?.();
+      hits[target].setAttribute("tabindex", "0");
+      hits[target].focus?.();
+      point(target);
     });
     hits.push(hit);
     chart.append(hit);
   });
-  container.append(chart);
+  stage.append(chart, tip);
+  container.append(stage);
   const list = html("ul", { class: "leg-summary" });
   for (const text of summary) list.append(html("li", {}, text));
   if (summary.length) container.append(list);
