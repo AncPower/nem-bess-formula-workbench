@@ -40,12 +40,20 @@ test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取�
     const chart = () => descendants(ids["price-chart"]);
     const input = (key) => descendants(ids["formula-list"]).find((node) => node.attributes["data-key"] === key);
     const reload = () => descendants(ids["data-bar"]).find((node) => node.tag === "button").listeners.click();
+    const decision_card = () => ids["formula-list"].children.find((node) => descendants(node).some((child) => child.tag === "h3" && child.textContent === "執行或等待"));
+    const card_word = () => descendants(decision_card()).find((node) => (node.attributes.class ?? "").startsWith("result")).textContent;
 
     assert.equal(word().textContent, "執行", "即時資料才給執行");
     assert.equal(input("charge_price").value, "35", "用的是讀到的電價，不是預設值");
     assert.match(word().attributes.class, /decision-go/);
-    assert.match(bar(), /最後實際時段 10 分鐘前/);
+    assert.match(bar(), /最後實際時段結束於 NEM 2026-10-20 23:30/);
+    assert.doesNotMatch(bar(), /最後實際時段 0 分鐘前/);
     assert.ok(chart().some((node) => node.tag === "li" && node.textContent.endsWith("+5 MW · 執行")));
+
+    respond = async () => ({ "5MIN": PRICES["5MIN"].map((row) => row.PERIODTYPE === "ACTUAL" ? { ...row, SETTLEMENTDATE: new Date(Date.parse(`${row.SETTLEMENTDATE}Z`) + 15 * 60000).toISOString().slice(0, 19) } : row) });
+    reload(); await flush(); await flush();
+    assert.match(bar(), /最後實際時段結束於 NEM 2026-10-20 23:45/);
+    assert.doesNotMatch(bar(), /0 分鐘前/, "未來的結束標記不冒充剛更新");
 
     const compare = () => descendants(ids["compare-body"]).map((node) => node.textContent).join("|");
     respond = async () => ({ "5MIN": PRICES["5MIN"].map((row) => row.PERIODTYPE === "FORECAST" && row.RRP === 35 ? { ...row, RRP: 35.123456789 } : row) });
@@ -78,12 +86,13 @@ test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取�
     mock.timers.tick(1 * 60 * 1000);
     assert.equal(word().textContent, "資料可能過期", "頁面開著不動，超過 35 分鐘自動轉成可能過期");
     assert.match(why(), /^最後實際時段是 36 分鐘前（超過 35 分鐘），請重新讀取 · 試算結果：執行/);
-    assert.match(bar(), /最後實際時段 36 分鐘前，可能過期/);
+    assert.match(bar(), /最後實際時段結束於 NEM 2026-10-20 23:30（UTC\+10），可能過期/);
 
     let fail;
     respond = () => new Promise((_, reject) => { fail = reject; });
     reload();
     assert.equal(word().textContent, "讀取中", "讀取中不給判斷");
+    assert.equal(card_word(), "讀取中", "公式卡片不能同時顯示執行");
     await flush();
     fail(new Error("AEMO API 回應 503"));
     await flush(); await flush();
@@ -97,6 +106,21 @@ test("T8 資料可信度：即時、手動試算、過期自動轉換、讀取�
     input("discharge_price").value = "200"; input("discharge_price").listeners.change();
     assert.equal(word().textContent, "手動試算", "讀取失敗後手動輸入就是手動試算");
     assert.match(why(), /^你改了「充電段均價」、「放電段均價」/);
+    let finish;
+    respond = () => new Promise((resolve) => { finish = resolve; });
+    reload(); await flush();
+    assert.equal(word().textContent, "手動試算", "手動均價仍可在取價期間試算");
+    assert.notEqual(card_word(), "讀取中", "不遮住明確手動試算的卡片");
+    finish(PRICES); await flush(); await flush();
+
+    // Timeout follows the existing failure cleanup and manual-trial path.
+    ids["reset-all"].listeners.click();
+    respond = async () => { throw new DOMException("Timed out", "TimeoutError"); };
+    reload(); await flush(); await flush();
+    assert.equal(word().textContent, "讀取失敗");
+    assert.match(why(), /15 秒.*逾時/);
+    assert.match(why(), /手動試算/);
+    assert.equal(input("charge_price").value, "40");
 
     respond = async () => PRICES;
     ids["reset-all"].listeners.click();
