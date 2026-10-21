@@ -33,7 +33,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
       arrayBuffer: async () => { const bytes = readFileSync(new URL(`../${path}`, import.meta.url)); return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); },
       json: async () => path.startsWith("https:") ? { "5MIN": [...Array.from({ length: 16 }, (_, index) => ({
         REGIONID: "NSW1", PERIODTYPE: "FORECAST", SETTLEMENTDATE: `2026-10-21T${String(Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}:00`, RRP: index < 8 ? 40 : 180,
-      })), { REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: "2026-10-20T23:00:00", RRP: 95 }, { REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: "2026-10-20T23:30:00", RRP: 88 }] } : path === "data/daily_summary.json" ? sample : JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8")),
+      })), ...Array.from({ length: 12 }, (_, i) => ({ REGIONID: "NSW1", PERIODTYPE: "ACTUAL", SETTLEMENTDATE: new Date(Date.parse("2026-10-20T22:35:00Z") + i * 300000).toISOString().slice(0, 19), RRP: i < 6 ? 95 : 88 }))] } : path === "data/daily_summary.json" ? sample : JSON.parse(readFileSync(new URL(`../${path}`, import.meta.url), "utf8")),
     });
     await import("../src/app.js");
     await flush();
@@ -66,7 +66,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     assert.ok(chart.some((node) => node.tag === "li" && node.textContent === "放電 04:00–07:30（台北 02:00–05:30）· 均價 A$ 180/MWh · +5 MW · 執行"));
     const tick_x = chart.filter((node) => node.tag === "text" && node.attributes.class === "tick" && /^\d\d:\d\d$/.test(node.textContent)).map((node) => Number(node.attributes.x));
     assert.ok(tick_x.length >= 2 && tick_x.every((x, index) => index === 0 || x - tick_x[index - 1] >= 64), "時間刻度至少相隔 64px，不會疊字");
-    assert.match(descendants(ids["data-bar"]).map((node) => node.textContent).join(""), /實際 2 個＋預調度 16 個 30 分鐘時段 · 每段 8 個時段/);
+    assert.match(descendants(ids["data-bar"]).map((node) => node.textContent).join(""), /實際 12 筆 5 分鐘資料 → 2 個完整 30 分鐘時段＋預調度 16 個 30 分鐘時段 · 每段 8 個時段/);
 
     const spread_card = card("價差");
     assert.deepEqual(descendants(spread_card).filter((node) => node.attributes.class === "chip-name").map((node) => node.textContent), ["放電段均價", "充電段均價"]);
@@ -119,6 +119,8 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     assert.match(verdict_why(), /^目標期間收益 · \d+ 天 × 可用率 [\d.]+ × 每日 A\$ 2,651 × 調整倍數 [\d.]+$/);
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.ok(descendants(ids["history-panel"]).some((node) => node.textContent === "試算：維持"));
+    assert.ok(descendants(ids["history-panel"]).some((node) => /淨收益 A\$ 2,800\.00/.test(node.textContent)), "歷史文字用千分位");
+    assert.ok(descendants(ids["history-panel"]).some((node) => node.tag === "td" && node.textContent === "2,800.00"), "歷史表格也用千分位");
     descendants(ids["history-panel"]).find((node) => node.attributes["aria-label"] === "試算標準 AUD/MWh").value = "141";
     descendants(ids["history-panel"]).find((node) => node.textContent === "重新試算").listeners.click();
     assert.ok(descendants(ids["history-panel"]).some((node) => node.textContent === "試算：建議下調"));
