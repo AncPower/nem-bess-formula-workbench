@@ -28,7 +28,7 @@ const PAGE_COPY = {
     lede: "目標期間收益＝天數 × 可用率 × 每日淨收益（選定分位數）× 因素調整倍數；下方用已下載的 AEMO 歷史電價，試算不同價差標準下的收益保留率。",
   },
 };
-const ORIGIN_LABELS = { user: "你調整的值", data: "來自預調度電價", config: "來自設定檔", default: "預設值", aggregate: "自動加總，不能直接改" };
+const ORIGIN_LABELS = { user: "你調整的值", data: "來自資料", config: "來自設定檔", default: "預設值", aggregate: "自動加總，不能直接改" };
 const GUIDANCE_LABELS = { principle: "原則", method: "方法", how_to_choose: "建議怎麼選" };
 const CATEGORY_LABELS = Object.fromEntries([...GROUPS.map((group) => [group.id, group.label]), ["result", "計算結果"]]);
 const PREVIEW_DELAY_MS = 200;
@@ -58,10 +58,14 @@ const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionD
 
 function evaluate_view() {
   const tab = current_tab();
+  const historical = state.scenario_history;
+  const use_history = historical?.active && !Object.hasOwn(state.value_overrides, "daily_revenue");
   const args = {
     registry: state.registry,
-    catalog: state.catalog,
-    context: { config: state.config, data: state.data },
+    catalog: use_history ? { ...state.catalog, variables: state.catalog.variables.map((entry) => entry.key === "daily_revenue"
+      ? { ...entry, source: { type: "data", ref: "scenario.daily_revenue" }, hint: `歷史 ${historical.quantile.toUpperCase()}：${historical.start} 至 ${historical.end}；事後價格，不是預測` } : entry) } : state.catalog,
+    context: { config: state.config, data: { ...state.data, scenario: historical } },
+    variable_errors: use_history && historical.error ? { daily_revenue: historical.error } : {},
     value_overrides: state.value_overrides,
     expression_overrides: state.expression_overrides,
   };
@@ -216,7 +220,7 @@ function render_data_bar(tab) {
   if (tab !== "predispatch") {
     section?.setAttribute("hidden", "");
     history.removeAttribute("hidden");
-    mount_history(history, state);
+    mount_history(history, state, () => { if (current_tab() === "scenario") { refresh(); render_formulas(evaluate_view()); } });
     return;
   }
   section?.removeAttribute("hidden");
@@ -288,10 +292,11 @@ function name_chip(name, formula_id, { variables, results }) {
     return chip;
   }
   const variable = find_variable(variables, name);
+  const history_error = name === "daily_revenue" && state.scenario_history?.active ? state.scenario_history.error : null;
   const id = `var-${formula_id}-${name}`;
   const chip = element("span", { class: `chip cat-${category}${variable?.origin === "user" ? " overridden" : ""}` });
   chip.append(element("label", { for: id, class: "chip-name" }, label));
-  const input = element("input", { id, type: "number", step: "any", inputmode: "decimal", value: String(variable?.value ?? 0), "data-key": name, "aria-describedby": tip_id });
+  const input = element("input", { id, type: "number", step: "any", inputmode: "decimal", value: history_error ? "" : String(variable?.value ?? 0), "data-key": name, "aria-describedby": tip_id });
   const size = () => input.setAttribute("style", `--chars: ${Math.min(10, Math.max(3, String(input.value).length))}`);
   size();
   if (variable?.origin === "aggregate") {
@@ -302,6 +307,7 @@ function name_chip(name, formula_id, { variables, results }) {
   if (!view.inputs.has(name)) view.inputs.set(name, []);
   view.inputs.get(name).push(input);
   const apply = () => {
+    if (name === "daily_revenue" && state.scenario_history) state.scenario_history.active = false;
     const value = Number(input.value);
     if (input.value === "" || !Number.isFinite(value)) delete state.value_overrides[name];
     else state.value_overrides[name] = value;
@@ -314,7 +320,7 @@ function name_chip(name, formula_id, { variables, results }) {
   if (variable?.origin === "user") chip.append(element("span", { class: "changed", "aria-label": "已改" }, "•"));
   const unit = variable?.unit && variable.unit !== "—" ? `單位：${variable.unit}` : null;
   const origin = variable?.added_by_user ? "你在公式裡新增的變數" : ORIGIN_LABELS[variable?.origin];
-  tip.textContent = [TERMS[name]?.meaning, variable?.hint, unit, origin].filter(Boolean).join("。");
+  tip.textContent = [TERMS[name]?.meaning, history_error, variable?.hint, unit, origin].filter(Boolean).join("。");
   chip.append(tip);
   return chip;
 }
@@ -468,6 +474,7 @@ async function start() {
   document.getElementById("reset-all").addEventListener("click", () => {
     state.value_overrides = {};
     state.expression_overrides = {};
+    state.scenario_history = null;
     view.editing.clear();
     render();
   });
