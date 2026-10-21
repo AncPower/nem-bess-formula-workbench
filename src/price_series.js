@@ -37,9 +37,10 @@ export function leg_range(forecast, start, length) {
  * 合併兩條序列成同一條時間軸，並標出充電段、放電段與「實際／預測」分界。
  * @param {{actual: object[], forecast: object[]}} series
  * @param {object|null} cycle best_single_cycle 的結果
+ * @param {string[]|null} window_times 指定時間軸（例如三天固定時段）；不給時用資料本身的時段
  */
-export function build_chart_model(series, cycle) {
-  const times = [...new Set([...series.actual, ...series.forecast].map((point) => point.settlement_date))].sort();
+export function build_chart_model(series, cycle, window_times = null) {
+  const times = window_times ?? [...new Set([...series.actual, ...series.forecast].map((point) => point.settlement_date))].sort();
   const lookup = (points) => new Map(points.map((point) => [point.settlement_date, point.price]));
   const actual = lookup(series.actual);
   const forecast = lookup(series.forecast);
@@ -49,7 +50,7 @@ export function build_chart_model(series, cycle) {
     return range ? { ...range, from: times.indexOf(range.first), to: times.indexOf(range.last), average } : null;
   };
   const prices = rows.flatMap((row) => [row.actual, row.forecast]).filter((price) => price !== null);
-  const first_forecast = series.forecast.length ? times.indexOf(series.forecast[0].settlement_date) : -1;
+  const first_forecast = series.forecast.length ? times.findIndex((time) => time >= series.forecast[0].settlement_date) : -1;
   return {
     rows,
     charge: cycle ? leg(cycle.charge_start, cycle.charge_average_price) : null,
@@ -70,4 +71,26 @@ export function time_label(settlement_date) {
 export function date_time_label(settlement_date) {
   const match = /^\d{4}-(\d\d)-(\d\d)T(\d\d:\d\d)/.exec(settlement_date);
   return match ? `${match[1]}/${match[2]} ${match[3]}` : settlement_date;
+}
+
+const SLOT_MS = 30 * 60 * 1000;
+const iso = (ms) => new Date(ms).toISOString().slice(0, 19);
+/** AEMO 時段標記是結束時間：「10/22 00:00」屬於 10/21 這個交易日。 */
+export function market_day(settlement_date) {
+  return iso(Date.parse(`${settlement_date}Z`) - SLOT_MS).slice(0, 10);
+}
+
+/**
+ * 三天固定時間軸：昨天、今天、明天各 48 個 30 分鐘時段，等距排列。
+ * 「今天」取第一個預調度時段所屬的交易日（沒有預調度時取最後一個實際時段）。
+ * @returns {{times: string[], days: {date: string, name: string}[]} | null}
+ */
+export function three_day_window(series) {
+  const anchor = series.forecast[0]?.settlement_date ?? series.actual.at(-1)?.settlement_date;
+  if (!anchor) return null;
+  const today = Date.parse(`${market_day(anchor)}T00:00:00Z`);
+  const days = [["昨天", -1], ["今天", 0], ["明天", 1]].map(([name, offset]) => ({ name, date: iso(today + offset * 48 * SLOT_MS).slice(0, 10) }));
+  const times = [];
+  for (let slot = 1; slot <= 144; slot += 1) times.push(iso(today - 48 * SLOT_MS + slot * SLOT_MS));
+  return { times, days };
 }
