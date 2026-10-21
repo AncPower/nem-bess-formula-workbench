@@ -1,5 +1,5 @@
 /**
- * 電價曲線資料：從同一份 AEMO 30 分鐘回應取出實際（ACTUAL）與預調度（FORECAST）電價，
+ * 電價曲線資料：實際（ACTUAL）5 分鐘價格聚合為完整 30 分鐘均價，預調度（FORECAST）維持 30 分鐘，
  * 並把選出的充放電時段對到時間軸上，供曲線圖使用。
  *
  * 不修改 predispatch.js：選窗仍由 best_single_cycle 負責，這裡只負責呈現用的資料整理。
@@ -8,7 +8,7 @@
 const PERIOD_TYPES = { ACTUAL: "actual", FORECAST: "forecast" };
 
 /**
- * @returns {{actual: {settlement_date: string, price: number}[], forecast: {settlement_date: string, price: number}[]}}
+ * @returns {{actual: object[], forecast: object[], actual_source: {count: number, first: string|null, last: string|null}}}
  */
 export function parse_price_series(payload, region_id = "NSW1") {
   const rows = payload?.["5MIN"];
@@ -23,6 +23,26 @@ export function parse_price_series(payload, region_id = "NSW1") {
   });
   for (const points of Object.values(series)) points.sort((a, b) => a.settlement_date.localeCompare(b.settlement_date));
   if (series.actual.length === 0 && series.forecast.length === 0) throw new Error(`AEMO 回應沒有 ${region_id} 的電價資料`);
+  const raw = series.actual;
+  const unique = new Map();
+  for (const point of raw) {
+    // 市場時鐘座標：00:00 是前一個半小時的結束，不放到下一桶。
+    const ms = Date.parse(`${point.settlement_date}Z`);
+    if (!Number.isFinite(ms) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/.test(point.settlement_date) || iso(ms) !== point.settlement_date) throw new Error("實際電價時間無法解析");
+    if (ms % (5 * 60000) !== 0) throw new Error("實際電價時間未對齊 5 分鐘");
+    if (unique.has(ms) && unique.get(ms) !== point.price) throw new Error("實際電價有衝突的重複時段");
+    unique.set(ms, point.price);
+  }
+  const buckets = new Map();
+  for (const [ms, price] of unique) {
+    const end = Math.ceil(ms / SLOT_MS) * SLOT_MS;
+    if (!buckets.has(end)) buckets.set(end, []);
+    buckets.get(end).push(price);
+  }
+  series.actual_source = { count: unique.size, first: raw[0]?.settlement_date ?? null, last: raw.at(-1)?.settlement_date ?? null };
+  series.actual = [...buckets].filter(([, values]) => values.length === 6)
+    .sort(([a], [b]) => a - b)
+    .map(([end, values]) => ({ settlement_date: iso(end), price: values.reduce((a, b) => a + b, 0) / 6 }));
   return series;
 }
 
