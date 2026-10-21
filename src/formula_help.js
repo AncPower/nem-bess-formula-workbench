@@ -37,7 +37,7 @@ export const TERMS = {
   dispatch_decision: { meaning: "1 代表執行，0 代表等待" },
   factor_multiplier: { meaning: "各因素加權平均後的收益倍數" },
   period_revenue: { meaning: "目標期間的總收益" },
-  daily_net_revenue: { meaning: "當天已執行循環的淨收益" },
+  daily_net_revenue: { meaning: "預調度範圍內已執行循環的淨收益加總" },
 };
 
 export const SHORT_LABELS = { executed_cycle_net_revenue: "已執行循環淨收益加總" };

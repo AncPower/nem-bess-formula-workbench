@@ -3,6 +3,7 @@
  * 時間軸固定為昨天、今天、明天三個交易日，每天 48 個 30 分鐘時段等距排列；實際電價實線、預調度電價虛線、充放電功率長條。
  * 時間刻度上下兩排是 NEM 市場時間與台北時間；依容器實際寬度繪製（不縮放字級），刻度間距不足時自動抽稀，避免文字重疊。
  * 游標滑過顯示垂直線與該時段的時間、電價；拖曳選取一段時間，暫時框框顯示該段的均價。只用 DOM API，不載入圖表套件。
+ * P12：模型有多個循環時，每個循環都畫充放電長條，圖下摘要與游標說明標出「循環 1」「循環 2」與各自的判斷。
  */
 
 import { time_label } from "./price_series.js";
@@ -32,6 +33,11 @@ const ms_of = (settlement_date) => Date.parse(`${settlement_date}Z`);
 const stamp = (ms) => new Date(ms).toISOString().slice(5, 16).replace("-", "/").replace("T", " ");
 const clock = (ms) => new Date(ms).toISOString().slice(11, 16);
 
+/** 模型裡的循環；舊的單循環模型（只有 charge／discharge）視為一個循環。 */
+const cycles_of = (model) => model.cycles ?? [{ charge: model.charge ?? null, discharge: model.discharge ?? null }];
+/** 第 index 個循環的判斷文字；沒有逐循環判斷時，第一個循環沿用 decision。 */
+const decision_of = (index, decision, decisions) => decisions?.[index] ?? (index === 0 ? decision : null);
+
 /** 「14:30」→ 台北時間「12:30」（市場時間 − 2 小時）。 */
 export function taipei_label(market_time) {
   const match = /^(\d\d):(\d\d)$/.exec(market_time);
@@ -57,14 +63,14 @@ export function label_every(slot_width, min_gap = MIN_LABEL_GAP) {
   return [1, 2, 3, 4, 6, 12, 24, 48].find((step) => step >= needed) ?? needed;
 }
 
-/** 充電段或放電段的一行摘要，放在圖下方（HTML，可自動換行，不會疊字）。 */
-export function leg_text(kind, leg, power_mw, decision) {
+/** 充電段或放電段的一行摘要，放在圖下方（HTML，可自動換行，不會疊字）。prefix 用來標「循環 1 」。 */
+export function leg_text(kind, leg, power_mw, decision, prefix = "") {
   if (!leg) return null;
   const range = `${time_label(leg.first)}–${time_label(leg.last)}`;
   const taipei = `${taipei_label(time_label(leg.first))}–${taipei_label(time_label(leg.last))}`;
   const power = kind === "charge" ? `−${power_mw} MW` : `+${power_mw} MW`;
   const name = kind === "charge" ? "充電" : "放電";
-  return `${name} ${range}（台北 ${taipei}）· 均價 ${money(leg.average)}/MWh · ${power}${kind === "discharge" && decision ? ` · ${decision}` : ""}`;
+  return `${prefix}${name} ${range}（台北 ${taipei}）· 均價 ${money(leg.average)}/MWh · ${power}${kind === "discharge" && decision ? ` · ${decision}` : ""}`;
 }
 
 /** 第 index 個時段的開始與結束（AEMO 標記是結束時間）。 */
@@ -81,14 +87,22 @@ export function span_label(start, end) {
 }
 
 /** 游標所在的時段：時間、實際與預調度電價、充放電動作。 */
-export function slot_detail(model, index, power_mw = 0, decision = null) {
+export function slot_detail(model, index, power_mw = 0, decision = null, decisions = null) {
   const row = model.rows[index];
   const { start, end } = slot_span(model, index);
   const inside = (leg) => leg && index >= leg.from && index <= leg.to;
+  const cycles = cycles_of(model);
+  const prefix = (number) => (cycles.length > 1 ? `循環 ${number + 1} ` : "");
   const lines = [];
   lines.push(row.actual === null ? "實際：無資料" : `實際 ${money(row.actual)}/MWh`);
   lines.push(row.forecast === null ? "預調度：無資料" : `預調度 ${money(row.forecast)}/MWh`);
-  lines.push(inside(model.charge) ? `充電 −${power_mw} MW` : inside(model.discharge) ? `放電 +${power_mw} MW${decision ? `（${decision}）` : ""}` : "不動作");
+  let action = "不動作";
+  cycles.forEach((cycle, number) => {
+    const label = decision_of(number, decision, decisions);
+    if (inside(cycle.charge)) action = `${prefix(number)}充電 −${power_mw} MW`;
+    else if (inside(cycle.discharge)) action = `${prefix(number)}放電 +${power_mw} MW${label ? `（${label}）` : ""}`;
+  });
+  lines.push(action);
   return { title: `NEM ${span_label(start, end)}`, lines };
 }
 
@@ -115,9 +129,10 @@ export function index_at(x, full_width, count) {
 /**
  * @param {HTMLElement} container
  * @param {ReturnType<import("./price_series.js").build_chart_model>} model
- * @param {{decision?: string|null, power_mw?: number, animate?: boolean, width?: number, days?: {date: string, name: string}[]}} options
+ * @param {{decision?: string|null, decisions?: (string|null)[]|null, power_mw?: number, animate?: boolean, width?: number, days?: {date: string, name: string}[]}} options
+ *   decision 是第一個循環的判斷；decisions 依循環順序列出每個循環的判斷（P12）。
  */
-export function render_dispatch_chart(container, model, { decision = null, power_mw = 0, animate = false, width, days = null } = {}) {
+export function render_dispatch_chart(container, model, { decision = null, decisions = null, power_mw = 0, animate = false, width, days = null } = {}) {
   container.replaceChildren();
   const legend = html("div", { class: "chart-legend" });
   for (const [kind, text] of [["actual", "實際電價（左軸）"], ["forecast", "預調度電價（左軸）"], ["charge", "充電功率（右軸）"], ["discharge", "放電功率（右軸）"]]) {
@@ -140,7 +155,12 @@ export function render_dispatch_chart(container, model, { decision = null, power
   const mw_limit = Math.max(power_mw, 1) * 1.25;
   const y_mw = (mw) => PAD.top + ((mw_limit - mw) / (2 * mw_limit)) * inner_height;
 
-  const summary = [leg_text("charge", model.charge, power_mw, decision), leg_text("discharge", model.discharge, power_mw, decision)].filter(Boolean);
+  const cycles = cycles_of(model);
+  const summary = cycles.flatMap((cycle, number) => {
+    const prefix = cycles.length > 1 ? `循環 ${number + 1} ` : "";
+    const label = decision_of(number, decision, decisions);
+    return [leg_text("charge", cycle.charge, power_mw, label, prefix), leg_text("discharge", cycle.discharge, power_mw, label, prefix)];
+  }).filter(Boolean);
   const chart = svg("svg", {
     width: full_width, height: HEIGHT, viewBox: `0 0 ${full_width} ${HEIGHT}`, role: "group",
     "aria-label": `NSW1 30 分鐘電價與充放電排程${days ? `（${days.map((day) => `${day.name} ${day.date.slice(5).replace("-", "/")}`).join("、")}）` : ""}。${summary.join("；") || "尚未選出充放電時段"}`,
@@ -165,13 +185,15 @@ export function render_dispatch_chart(container, model, { decision = null, power
     });
   }
 
-  for (const [kind, leg, sign] of [["charge", model.charge, -1], ["discharge", model.discharge, 1]]) {
-    if (!leg || leg.from < 0 || leg.to < 0 || !(power_mw > 0)) continue;
-    for (let index = leg.from; index <= leg.to; index += 1) {
-      const top = sign > 0 ? y_mw(power_mw) : y_mw(0);
-      chart.append(svg("rect", { x: edge(index) + step * 0.1, y: top, width: step * 0.8, height: Math.abs(y_mw(0) - y_mw(power_mw)), class: `band-${kind}` }));
+  for (const cycle of cycles) {
+    for (const [kind, leg, sign] of [["charge", cycle.charge, -1], ["discharge", cycle.discharge, 1]]) {
+      if (!leg || leg.from < 0 || leg.to < 0 || !(power_mw > 0)) continue;
+      for (let index = leg.from; index <= leg.to; index += 1) {
+        const top = sign > 0 ? y_mw(power_mw) : y_mw(0);
+        chart.append(svg("rect", { x: edge(index) + step * 0.1, y: top, width: step * 0.8, height: Math.abs(y_mw(0) - y_mw(power_mw)), class: `band-${kind}` }));
+      }
+      chart.append(svg("line", { x1: edge(leg.from), x2: edge(leg.to + 1), y1: y(leg.average), y2: y(leg.average), class: `average-${kind}` }));
     }
-    chart.append(svg("line", { x1: edge(leg.from), x2: edge(leg.to + 1), y1: y(leg.average), y2: y(leg.average), class: `average-${kind}` }));
   }
 
   if (model.boundary !== null) chart.append(svg("line", { x1: edge(model.boundary), x2: edge(model.boundary), y1: PAD.top, y2: HEIGHT - PAD.bottom, class: "boundary" }));
@@ -240,7 +262,7 @@ export function render_dispatch_chart(container, model, { decision = null, power
       show_tip(range_summary(model, state.range.from, state.range.to), edge(state.range.to + 1));
     } else {
       selection.setAttribute("visibility", "hidden");
-      show_tip(slot_detail(model, index, power_mw, decision), x(index));
+      show_tip(slot_detail(model, index, power_mw, decision, decisions), x(index));
     }
   };
   const index_from = (event) => {
@@ -273,7 +295,7 @@ export function render_dispatch_chart(container, model, { decision = null, power
   // 鍵盤：方向鍵逐格移動，Shift＋方向鍵選取一段時間
   const hits = [];
   model.rows.forEach((row, index) => {
-    const detail = slot_detail(model, index, power_mw, decision);
+    const detail = slot_detail(model, index, power_mw, decision, decisions);
     const hit = svg("rect", { x: edge(index), y: PAD.top, width: step, height: inner_height, class: "hit", tabindex: index === 0 ? "0" : "-1", role: "img", "aria-label": [detail.title, ...detail.lines].join(" · ") });
     hit.addEventListener("focus", () => { if (state.anchor === null) state.anchor = index; point(index); });
     hit.addEventListener("blur", () => { if (!state.range) hide(); });

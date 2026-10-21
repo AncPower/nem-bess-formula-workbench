@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "max_cycles": 2,
+  "max_cycles_scope": "predispatch_horizon",
+  "basis": "P12：預調度範圍內最多循環數的預設值；以整段預調度範圍計，不是市場日。頁面可暫時調整，不寫回本檔。"
+}

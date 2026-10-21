@@ -50,7 +50,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     assert.equal(ids["page-title"].textContent, "預調度：下一個循環要執行還是等待", "標題說明分頁用途");
     assert.match(ids["page-lede"].textContent, /每段長度＝容量 ÷ 功率/);
     assert.equal(verdict_word(), "執行");
-    assert.equal(verdict_why(), "價差 140 ≥ 標準 0 AUD/MWh · 每循環淨收益 A$ 2,800 · 當日執行淨收益 A$ 2,800");
+    assert.equal(verdict_why(), "價差 140 ≥ 標準 0 AUD/MWh · 每循環淨收益 A$ 2,800 · 預調度範圍執行淨收益 A$ 2,800");
     assert.ok(![ids["page-lede"], ids.verdict].some((node) => descendants(node).some((child) => /不是預測/.test(child.textContent))), "不另外加免責口號");
     assert.equal(result("每日執行淨收益"), "A$ 2,800");
     assert.equal(input("executed_cycle_net_revenue").attributes.disabled, "");

@@ -7,6 +7,7 @@
  * 輸入時即時預覽（input 事件，短暫延遲後重算）；離開欄位或按 Enter（change 事件）才重建整頁。
  * 分享與比較（P7）：設定可編進網址；比較區用同一份當次資料，並排預設版與目前版本。
  * 資料可信度（T8）：只有即時資料才在結論列給「執行／等待」；手動試算、讀取中、讀取失敗、可能過期都另外標示。
+ * 多循環（P12）：在預調度範圍內依「最多循環數」選出不重疊的循環，逐循環判斷；上限以整段預調度範圍計，不是市場日。
  */
 
 import { compute } from "./engine.js";
@@ -19,7 +20,8 @@ import { build_chart_model, leg_range, parse_price_series, three_day_window } fr
 import { render_dispatch_chart } from "./price_chart.js";
 import { GROUPS, SHORT_LABELS, TERMS, group_of, short_label } from "./formula_help.js";
 import { FUNCTION_TEXT, from_chinese, to_chinese, to_parts } from "./formula_text.js";
-import { STALE_MINUTES, data_trust } from "./data_trust.js";
+import { PRICE_KEYS, STALE_MINUTES, data_trust } from "./data_trust.js";
+import { MAX_CYCLES, best_cycles, valid_max_cycles } from "./cycles.js";
 import { money, price_input } from "./format.js";
 import { apply_share, compare_rows, custom_key, decode_share, encode_share, read_share, share_snapshot, share_url } from "./share_state.js";
 
@@ -27,7 +29,7 @@ const TABS = ["predispatch", "scenario"];
 const PAGE_COPY = {
   predispatch: {
     title: "預調度：下一個循環要執行還是等待",
-    lede: "讀取 AEMO NSW1 的 30 分鐘預調度電價，選出均價最低的一段充電與其後均價最高的一段放電（每段長度＝容量 ÷ 功率），扣掉來回效率、損耗成本與邊際損失係數；價差達到標準且淨收益為正才執行。",
+    lede: "讀取 AEMO NSW1 的 30 分鐘預調度電價，在預調度範圍內依最多循環數選出不重疊的循環：每個循環是均價低的一段充電、接著均價高的一段放電（每段長度＝容量 ÷ 功率），扣掉來回效率、損耗成本與邊際損失係數；逐循環判斷，價差達到標準且淨收益為正才執行。",
   },
   scenario: {
     title: "情境評估：目標期間能賺多少、價差標準要不要調",
@@ -40,7 +42,7 @@ const CATEGORY_LABELS = Object.fromEntries([...GROUPS.map((group) => [group.id, 
 const PREVIEW_DELAY_MS = 200;
 const TRUST_CHECK_MS = 60 * 1000;
 
-const state = { registry: null, catalog: null, config: {}, data: {}, series: null, value_overrides: {}, expression_overrides: {}, custom_labels: {}, data_status: null, scenario_history: null, share_notice: null };
+const state = { registry: null, catalog: null, config: {}, forecast: null, series: null, max_cycles: null, value_overrides: {}, expression_overrides: {}, custom_labels: {}, data_status: null, scenario_history: null, share_notice: null };
 const view = { results: new Map(), result_chips: new Map(), inputs: new Map(), aggregates: new Map(), editing: new Set(), timer: null, decision: null, width: null };
 
 const element = (tag, attributes = {}, text) => {
@@ -64,28 +66,44 @@ function format_value(value, format, unit) {
 const plain_number = (value) => value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
 
 /** 預設版：沒有任何覆寫、改寫或歷史模式，但沿用同一份當次資料。 */
-const default_settings = () => ({ value_overrides: {}, expression_overrides: {}, scenario_history: null });
+const default_settings = () => ({ value_overrides: {}, expression_overrides: {}, scenario_history: null, max_cycles: null });
+
+/** 預調度範圍內最多循環數：預設來自 config/dispatch.json；null 代表沿用預設。 */
+const default_max_cycles = () => state.config.dispatch?.max_cycles ?? 1;
+const max_cycles_of = (settings) => settings.max_cycles ?? default_max_cycles();
+
+/**
+ * 依設定選出的循環（P12）。手動改了充電或放電均價時只試算循環 1（下一個循環），
+ * 因為同一組手動均價套到每個循環沒有意義；trimmed 是因此沒有試算的循環數。
+ */
+function plan_cycles(settings) {
+  const selected = state.forecast ? best_cycles(state.forecast, state.config.battery, max_cycles_of(settings)) : [];
+  const manual = PRICE_KEYS.some((key) => Object.hasOwn(settings.value_overrides, key));
+  const used = manual ? selected.slice(0, 1) : selected;
+  return { selected, used, trimmed: selected.length - used.length };
+}
 
 function evaluate_view(settings = state) {
   const tab = current_tab();
   const historical = settings.scenario_history;
+  const cycles = plan_cycles(settings);
   const use_history = historical?.active && !Object.hasOwn(settings.value_overrides, "daily_revenue");
   const args = {
     registry: state.registry,
     catalog: use_history ? { ...state.catalog, variables: state.catalog.variables.map((entry) => entry.key === "daily_revenue"
       ? { ...entry, source: { type: "data", ref: "scenario.daily_revenue" }, hint: `歷史 ${historical.quantile.toUpperCase()}：${historical.start} 至 ${historical.end}；事後價格，不是預測` } : entry) } : state.catalog,
-    context: { config: state.config, data: { ...state.data, scenario: historical } },
+    context: { config: state.config, data: { ...(cycles.used.length ? { predispatch: cycles.used[0] } : {}), scenario: historical } },
     variable_errors: use_history && historical.error ? { daily_revenue: historical.error } : {},
     value_overrides: settings.value_overrides,
     expression_overrides: settings.expression_overrides,
   };
   const base = compute(args);
-  const plan = compute_day({ ...args, cycles: [state.data] });
+  const plan = compute_day({ ...args, cycles: cycles.used.length ? cycles.used.map((cycle) => ({ predispatch: cycle })) : [{}] });
   const variables = [...new Map([...base.variables, ...plan.cycles[0].variables, ...plan.daily.variables].map((variable) => [variable.key, variable])).values()];
   const results = [...new Map([...base.results, ...plan.cycles[0].results, ...plan.daily.results].map((result) => [result.id, result])).values()];
   const visible = state.registry.formulas.filter((formula) => formula.page === tab || formula.page === "shared");
   const visible_results = visible.map((formula) => results.find((result) => result.id === formula.id));
-  return { tab, variables, results, visible, visible_results };
+  return { tab, variables, results, visible, visible_results, cycles, cycle_results: plan.cycles.map((cycle) => cycle.results) };
 }
 
 /** 代號 → 中文名稱（畫面上唯一出現的名稱）。 */
@@ -141,7 +159,7 @@ function refresh() {
   const result = evaluate_view();
   result.visible.forEach((formula, index) => {
     const node = view.results.get(formula.id);
-    if (node) paint_result(node, formula, result.visible_results[index]);
+    if (node) paint_result(node, formula, result.visible_results[index], result.cycle_results);
   });
   for (const [id, nodes] of view.result_chips) {
     const entry = result.results.find((item) => item.id === id);
@@ -181,7 +199,7 @@ const find_result = (results, id) => results.find((entry) => entry.id === id);
 const find_variable = (variables, key) => variables.find((entry) => entry.key === key);
 
 /** 結論列：預調度顯示執行或等待；情境評估顯示目標期間收益。理由寫具體數字。 */
-function render_verdict({ tab, results, variables }) {
+function render_verdict({ tab, results, variables, cycles, cycle_results }) {
   const node = document.getElementById("verdict");
   if (!node) return;
   const word = element("p", { class: "verdict-word" });
@@ -206,9 +224,24 @@ function render_verdict({ tab, results, variables }) {
     } else {
       const go = decision.value !== 0;
       const parts = [];
-      if (spread && !spread.error && standard) parts.push(`價差 ${plain_number(spread.value)} ${spread.value >= standard.value ? "≥" : "<"} 標準 ${plain_number(standard.value)} AUD/MWh`);
-      if (cycle && !cycle.error) parts.push(`每循環淨收益 ${format_value(cycle.value, "currency")}`);
-      if (daily && !daily.error) parts.push(`當日執行淨收益 ${format_value(daily.value, "currency")}`);
+      if (cycle_results.length > 1) {
+        // P12：逐循環列出判斷；結論列的大字是循環 1（下一個循環）。
+        cycle_results.forEach((list, index) => {
+          const own = find_result(list, "dispatch_decision");
+          const own_spread = find_result(list, "spread");
+          const own_net = find_result(list, "cycle_net_revenue");
+          const bits = [];
+          if (own_spread && !own_spread.error && standard) bits.push(`價差 ${plain_number(own_spread.value)} ${own_spread.value >= standard.value ? "≥" : "<"} ${plain_number(standard.value)}`);
+          if (own_net && !own_net.error) bits.push(`淨收益 ${format_value(own_net.value, "currency")}`);
+          const text = !own || own.error ? "無法判斷" : own.value !== 0 ? "執行" : "等待";
+          parts.push(`循環 ${index + 1}：${text}${bits.length ? `（${bits.join("，")}）` : ""}`);
+        });
+      } else {
+        if (spread && !spread.error && standard) parts.push(`價差 ${plain_number(spread.value)} ${spread.value >= standard.value ? "≥" : "<"} 標準 ${plain_number(standard.value)} AUD/MWh`);
+        if (cycle && !cycle.error) parts.push(`每循環淨收益 ${format_value(cycle.value, "currency")}`);
+      }
+      if (daily && !daily.error) parts.push(`預調度範圍執行淨收益 ${format_value(daily.value, "currency")}`);
+      if (cycles.trimmed > 0) parts.push(`手動均價只試算循環 1，另 ${cycles.trimmed} 個循環未計入`);
       if (trust.kind === "live") {
         word.textContent = go ? "執行" : "等待";
         word.setAttribute("class", `verdict-word ${go ? "decision-go" : "decision-wait"}`);
@@ -272,29 +305,46 @@ function render_data_bar(tab) {
     }
     else if (trust.kind === "stale") bar.append(element("span", { class: "error" }, "無法判斷資料時間，可能過期"));
   } else bar.append(element("span", {}, "尚未讀取，目前用預設均價。"));
+  const max_cycles = max_cycles_of(state);
+  if (state.forecast) bar.append(element("span", {}, `排出 ${plan_cycles(state).selected.length} 個循環（預調度範圍內最多 ${max_cycles} 個）`));
+  const cap = element("label", { class: "cycle-cap" }, "預調度範圍內最多循環數 ");
+  const select = element("select", { "aria-label": "預調度範圍內最多循環數" });
+  for (let count = 1; count <= MAX_CYCLES; count += 1) select.append(element("option", { value: String(count) }, `${count} 個`));
+  select.value = String(max_cycles);
+  select.addEventListener("change", () => {
+    const value = Number(select.value);
+    if (!valid_max_cycles(value)) return;
+    state.max_cycles = value === default_max_cycles() ? null : value;
+    render();
+  });
+  cap.append(select);
+  bar.append(cap);
   const button = element("button", { type: "button", class: "primary" }, status?.loading ? "讀取中…" : "重新讀取 AEMO 電價");
   if (status?.loading) button.setAttribute("disabled", "");
   button.addEventListener("click", load_predispatch);
   bar.append(button);
 }
 
-function render_chart({ tab, results }) {
+function render_chart({ tab, cycles, cycle_results }) {
   const container = document.getElementById("price-chart");
   if (!container || tab !== "predispatch") { container?.replaceChildren(); return; }
   if (!state.series) {
     container.replaceChildren(element("p", { class: "note" }, state.data_status?.loading ? "電價讀取中…" : "讀到 AEMO 電價後，這裡會畫出昨天到明天的實際與預調度電價，以及建議的充放電時段與功率。"));
     return;
   }
-  const decision = find_result(results, "dispatch_decision");
   const trust = current_trust();
-  const base_label = decision && !decision.error ? format_value(decision.value, "decision") : null;
-  const label = base_label && trust.kind !== "live" ? `試算：${base_label}` : base_label;
-  const animate = view.decision !== null && label !== null && label !== view.decision;
+  const labels = cycle_results.map((list) => {
+    const decision = find_result(list, "dispatch_decision");
+    const base_label = decision && !decision.error ? format_value(decision.value, "decision") : null;
+    return base_label && trust.kind !== "live" ? `試算：${base_label}` : base_label;
+  });
+  const label = labels.join("|");
+  const animate = view.decision !== null && labels[0] !== null && label !== view.decision;
   view.decision = label;
   view.width = container.clientWidth || null;
   const timeline = three_day_window(state.series);
-  const model = build_chart_model(state.series, state.data.predispatch ?? null, timeline?.times ?? null);
-  render_dispatch_chart(container, model, { decision: label, power_mw: state.config.battery?.power_mw ?? 0, animate, days: timeline?.days ?? null });
+  const model = build_chart_model(state.series, cycles.used, timeline?.times ?? null);
+  render_dispatch_chart(container, model, { decision: labels[0] ?? null, decisions: labels, power_mw: state.config.battery?.power_mw ?? 0, animate, days: timeline?.days ?? null });
   const source = state.series.actual_source;
   if (source?.count) container.append(element("p", { class: "note" }, `實際電價來源範圍（5 分鐘時段結束，NEM UTC+10）：${source.first.replace("T", " ")} 至 ${source.last.replace("T", " ")}；僅畫出每段六筆齊全的 30 分鐘均價，範圍外或缺筆處留空。`));
   if (state.series.actual.length === 0) container.append(element("p", { class: "note" }, "這次回應沒有完整的實際電價 30 分鐘時段，只畫出預調度電價。"));
@@ -310,6 +360,9 @@ function setting_changes(base_variables) {
   }
   for (const [id, expression] of Object.entries(state.expression_overrides)) {
     items.push(`改寫「${label_of(id)}」＝ ${to_chinese(expression, label_of)}`);
+  }
+  if (Number.isInteger(state.max_cycles) && state.max_cycles !== default_max_cycles()) {
+    items.push(`預調度範圍內最多循環數：${default_max_cycles()} → ${state.max_cycles}`);
   }
   const history = state.scenario_history;
   if (history?.active && !Object.hasOwn(state.value_overrides, "daily_revenue")) {
@@ -384,10 +437,24 @@ async function share_settings() {
   }
 }
 
-function paint_result(node, formula, result) {
+function paint_result(node, formula, result, cycle_results = []) {
   if (formula.id === "dispatch_decision" && current_tab() === "predispatch" && current_trust().kind === "loading") {
     node.setAttribute("class", "result");
     node.textContent = "讀取中";
+    return;
+  }
+  if (formula.scope === "cycle" && cycle_results.length > 1) {
+    // P12：每循環公式逐循環列出結果；底色依循環 1（下一個循環）。
+    const entries = cycle_results.map((list) => find_result(list, formula.id));
+    const failed = entries.find((entry) => !entry || entry.error);
+    if (failed !== undefined) {
+      node.setAttribute("class", "result error");
+      node.textContent = failed?.error ?? "無法計算";
+      return;
+    }
+    const decision = formula.format === "decision" ? (entries[0].value !== 0 ? " decision-go" : " decision-wait") : "";
+    node.setAttribute("class", `result${decision}`);
+    node.textContent = entries.map((entry, index) => `循環 ${index + 1} ${format_value(entry.value, formula.format, formula.unit)}`).join(" · ");
     return;
   }
   if (result.error) {
@@ -478,7 +545,7 @@ function expression_row(expression, formula_id, context) {
 }
 
 function render_formulas(context) {
-  const { visible, visible_results } = context;
+  const { visible, visible_results, cycle_results } = context;
   const list = document.getElementById("formula-list");
   list.replaceChildren();
   view.results.clear();
@@ -491,10 +558,10 @@ function render_formulas(context) {
     const header = element("header");
     const title = element("div", { class: "card-title" });
     title.append(element("h3", {}, formula.name));
-    if (formula.scope === "cycle" || formula.scope === "daily") title.append(element("span", { class: "tag" }, formula.scope === "cycle" ? "每循環" : "每日彙總（目前單循環計畫）"));
+    if (formula.scope === "cycle" || formula.scope === "daily") title.append(element("span", { class: "tag" }, formula.scope === "cycle" ? "每循環" : "彙總：預調度範圍內已執行的循環"));
     header.append(title);
     const value = element("div", { class: "result" });
-    paint_result(value, formula, result);
+    paint_result(value, formula, result, cycle_results);
     view.results.set(formula.id, value);
     header.append(value);
     card.append(header);
@@ -581,7 +648,7 @@ async function load_predispatch() {
     const forecast = parse_report(payload);
     const cycle = best_single_cycle(forecast, state.config.battery);
     if (!cycle) throw new Error("預測時段不足以排出一個完整循環");
-    state.data = { predispatch: cycle };
+    state.forecast = forecast;
     state.series = series;
     state.data_status = {
       cycle, fetched_at: new Date(), actual_periods: series.actual.length,
@@ -590,7 +657,7 @@ async function load_predispatch() {
     };
   } catch (error) {
     // T8：讀取失敗時不保留上一次的電價與曲線，避免舊值被當成當下建議。
-    state.data = {};
+    state.forecast = null;
     state.series = null;
     state.data_status = { error: error.message };
   }
@@ -604,19 +671,22 @@ async function load_json(path) {
 }
 
 async function start() {
-  const [registry, catalog, battery, spread_standard] = await Promise.all([
+  const [registry, catalog, battery, spread_standard, dispatch] = await Promise.all([
     load_json("formulas/registry.json"),
     load_json("formulas/variables.json"),
     load_json("config/battery.json"),
     load_json("config/spread_standard.json"),
+    load_json("config/dispatch.json"),
   ]);
   const problems = check_registry(registry, catalog);
   if (problems.length > 0) throw new Error(`公式登記檔有問題：${problems.join("；")}`);
-  Object.assign(state, { registry, catalog, config: { battery, spread_standard } });
+  if (!valid_max_cycles(dispatch?.max_cycles)) throw new Error(`config/dispatch.json 的 max_cycles 必須是 1 到 ${MAX_CYCLES} 的整數`);
+  Object.assign(state, { registry, catalog, config: { battery, spread_standard, dispatch } });
   const shared = read_share(location.search);
   if (shared !== null) {
     try {
       apply_share(state, decode_share(shared, { registry, catalog }));
+      if (state.max_cycles === default_max_cycles()) state.max_cycles = null;
       state.share_notice = { text: "已套用分享網址的設定；電價依開啟當下取得的資料重算，結果可能與分享時不同。" };
     } catch (error) {
       state.share_notice = { error: true, text: `分享網址無法套用：${error.message}。已用預設值開啟。` };
@@ -627,6 +697,7 @@ async function start() {
     state.expression_overrides = {};
     state.custom_labels = {};
     state.scenario_history = null;
+    state.max_cycles = null;
     state.share_notice = null;
     document.getElementById("share-output")?.replaceChildren();
     if (location.search && typeof window.history?.replaceState === "function") window.history.replaceState(null, "", `${location.pathname}${location.hash}`);
